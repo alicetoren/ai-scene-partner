@@ -1,40 +1,95 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 function App() {
-  const [status, setStatus] = useState('loading')
-  const [message, setMessage] = useState('Connecting to the backend…')
+  const [file, setFile] = useState(null)
+  const [scene, setScene] = useState(null)
+  const [selectedCharacter, setSelectedCharacter] = useState('')
+  const [status, setStatus] = useState('idle')
+  const [error, setError] = useState('')
 
-  useEffect(() => {
-    async function checkBackend() {
-      try {
-        const response = await fetch('/api/health')
+  function handleFileChange(event) {
+    const nextFile = event.target.files?.[0] ?? null
+    setFile(nextFile)
+    setError('')
+  }
 
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`)
-        }
-
-        const data = await response.json()
-        setMessage(data.message)
-        setStatus('success')
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : 'Unable to reach the backend.')
-        setStatus('error')
-      }
+  async function handleAnalyze(event) {
+    event.preventDefault()
+    if (!file) {
+      setError('Choose a .txt script before analyzing.')
+      return
     }
 
-    checkBackend()
-  }, [])
+    setStatus('loading')
+    setError('')
+    setScene(null)
+    setSelectedCharacter('')
+
+    const formData = new FormData()
+    formData.append('script_file', file)
+
+    try {
+      const response = await fetch('/api/scenes/parse', { method: 'POST', body: formData })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'The script could not be analyzed.')
+      }
+
+      setScene(data)
+      setStatus('success')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'The script could not be analyzed.')
+      setStatus('error')
+    }
+  }
 
   return (
     <main className="page">
-      <section className="status-card" aria-live="polite">
+      <section className="status-card">
         <p className="eyebrow">AI Scene Partner</p>
-        <h1>Frontend ↔ backend connection</h1>
-        <p className={`status status--${status}`}>
-          {status === 'loading' && 'Loading: '}
-          {status === 'error' && 'Connection error: '}
-          {message}
-        </p>
+        <h1>Turn your script into a practice scene.</h1>
+        <p className="intro">Upload a UTF-8 plain-text script to identify characters and dialogue.</p>
+
+        <form className="upload-form" onSubmit={handleAnalyze}>
+          <label htmlFor="script-file">Plain-text script (.txt)</label>
+          <input id="script-file" type="file" accept=".txt,text/plain" onChange={handleFileChange} />
+          <button type="submit" disabled={status === 'loading'}>
+            {status === 'loading' ? 'Analyzing script…' : 'Analyze Script'}
+          </button>
+        </form>
+
+        {error && <p className="status status--error" role="alert">{error}</p>}
+
+        {scene && (
+          <section className="scene" aria-live="polite">
+            <h2>{scene.title}</h2>
+            <label htmlFor="actor-character">I am playing</label>
+            <select
+              id="actor-character"
+              value={selectedCharacter}
+              onChange={(event) => setSelectedCharacter(event.target.value)}
+            >
+              <option value="">Select a character</option>
+              {scene.characters.map((character) => <option key={character} value={character}>{character}</option>)}
+            </select>
+
+            <h3>Detected characters</h3>
+            <div className="characters">
+              {scene.characters.map((character) => <span key={character}>{character}</span>)}
+            </div>
+
+            <h3>Dialogue</h3>
+            <ol className="dialogue">
+              {scene.lines.map((line) => (
+                <li className={line.character === selectedCharacter ? 'actor-line' : ''} key={line.id}>
+                  <strong>{line.character}</strong>
+                  <span>{line.text}</span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
       </section>
     </main>
   )
