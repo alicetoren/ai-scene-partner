@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 
 from app.routes import router
+from app.speech_routes import router as speech_router
 
 
 app = FastAPI(title="AI Scene Partner API")
 app.include_router(router)
+app.include_router(speech_router)
 
 
 @app.get("/api/health")

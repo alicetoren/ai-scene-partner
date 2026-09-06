@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ScenePlayback from './components/ScenePlayback'
 
 function App() {
   const [file, setFile] = useState(null)
@@ -79,15 +80,7 @@ function App() {
               {scene.characters.map((character) => <span key={character}>{character}</span>)}
             </div>
 
-            <h3>Dialogue</h3>
-            <ol className="dialogue">
-              {scene.lines.map((line) => (
-                <li className={line.character === selectedCharacter ? 'actor-line' : ''} key={line.id}>
-                  <strong>{line.character}</strong>
-                  <span>{line.text}</span>
-                </li>
-              ))}
-            </ol>
+            <ScenePlayback key={selectedCharacter} scene={scene} actor={selectedCharacter} />
           </section>
         )}
       </section>
