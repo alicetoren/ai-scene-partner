@@ -15,7 +15,7 @@ export default function ScenePlayback({ scene, actor }) {
   }
 
   return (
-    <>
+    <div className="scene-player" ref={playback.playerRef}>
       <section className="playback" aria-label="Scene playback">
         <p className="intro">The reader voice is AI-generated. Advance manually after each line.</p>
         <p role="status">{messages[playback.phase]}</p>
@@ -48,6 +48,6 @@ export default function ScenePlayback({ scene, actor }) {
           </li>
         ))}
       </ol>
-    </>
+    </div>
   )
 }

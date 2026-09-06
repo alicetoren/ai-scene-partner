@@ -1,34 +1,38 @@
 import { useEffect, useRef, useState } from 'react'
+import { createReaderAudio } from '../playback/readerAudio.js'
+import { handlePlayerSpace } from '../playback/keyboard.js'
 
 const initialState = { phase: 'idle', index: -1, error: '' }
 const canContinue = (phase) => phase === 'actor' || phase === 'reader-ready'
 
 export function useScenePlayback(scene, actor) {
   const [state, setState] = useState(initialState)
-  // The ref is updated synchronously so rapid clicks cannot race React's render.
+  // Synchronous guards prevent rapid clicks racing React's next render.
   const current = useRef(initialState)
-  const resources = useRef({ generation: 0, controller: null, audio: null, url: null })
+  const resources = useRef({ generation: 0, audio: null })
+  const buffer = useRef(null)
+  const playerRef = useRef(null)
+  if (!buffer.current) buffer.current = createReaderAudio(scene, actor)
 
   function transition(next) {
     current.current = next
     setState(next)
   }
 
-  function release() {
+  function stop() {
     const r = resources.current
     r.generation += 1
-    r.controller?.abort()
-    r.controller = null
     if (r.audio) {
       r.audio.onended = null
       r.audio.onerror = null
       r.audio.pause()
-      r.audio.removeAttribute('src')
-      r.audio.load()
       r.audio = null
     }
-    if (r.url) URL.revokeObjectURL(r.url)
-    r.url = null
+  }
+
+  function release() {
+    stop()
+    buffer.current.clear()
   }
 
   useEffect(() => () => release(), [])
@@ -50,57 +54,50 @@ export function useScenePlayback(scene, actor) {
     }
   }
 
-  async function generate(index) {
-    const line = scene.lines[index]
-    // This guard is also enforced at entry: actor text never reaches the API.
-    if (!line || line.character === actor) return
-    release()
-    const r = resources.current
-    const generation = r.generation
-    const controller = new AbortController()
-    r.controller = controller
+  function playReader(index) {
+    const entry = buffer.current.forPlayback(index)
+    if (!entry) return
+    const generation = resources.current.generation
     transition({ phase: 'loading', index, error: '' })
-    try {
-      const response = await fetch('/api/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: line.text }),
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        const data = await response.json().catch(() => null)
-        throw new Error(typeof data?.detail === 'string' ? data.detail : 'Speech generation failed. Please retry this line.')
+    function ready(audio) {
+      if (generation !== resources.current.generation) return
+      if (audio.error) {
+        buffer.current.discard(index)
+        transition({ phase: 'speech-error', index, error: 'Audio could not be loaded. Please retry this line.' })
+        return
       }
-      const blob = await response.blob()
-      if (generation !== r.generation) return
-      if (!blob.size) throw new Error('No audio was returned. Please retry this line.')
-      r.url = URL.createObjectURL(blob)
-      r.audio = new Audio(r.url)
-      r.audio.onended = () => {
-        if (generation === r.generation) transition({ phase: 'reader-ready', index, error: '' })
+      resources.current.audio = audio
+      audio.onended = () => {
+        if (generation === resources.current.generation) transition({ phase: 'reader-ready', index, error: '' })
       }
-      r.audio.onerror = () => {
-        if (generation !== r.generation) return
-        release()
+      audio.onerror = () => {
+        if (generation !== resources.current.generation) return
+        stop()
+        buffer.current.discard(index)
         transition({ phase: 'speech-error', index, error: 'Audio could not be played. Please retry this line.' })
       }
       transition({ phase: 'reader-ready', index, error: '' })
-      await playAudio()
-    } catch (error) {
-      if (generation !== r.generation) return
-      transition({ phase: 'speech-error', index, error: error.message || 'Speech request failed. Please retry this line.' })
+      void playAudio()
     }
+    // Ready audio plays directly in the click/key gesture; pending work is shared.
+    if (entry.audio) ready(entry.audio)
+    else entry.promise.then(ready).catch((error) => {
+      if (generation !== resources.current.generation) return
+      transition({ phase: 'speech-error', index, error: error.message || 'Speech request failed. Please retry this line.' })
+    })
   }
 
   function enterLine(index) {
-    release()
+    stop()
     if (index >= scene.lines.length) {
+      buffer.current.clear()
       transition({ phase: 'complete', index: -1, error: '' })
-    } else if (scene.lines[index].character === actor) {
-      transition({ phase: 'actor', index, error: '' })
-    } else {
-      void generate(index)
+      return
     }
+    if (scene.lines[index].character === actor) transition({ phase: 'actor', index, error: '' })
+    else playReader(index)
+    // Keep current audio for replay and the next two readers, skipping actor lines.
+    buffer.current.prefetchAfter(index)
   }
 
   function advance() {
@@ -109,11 +106,7 @@ export function useScenePlayback(scene, actor) {
 
   useEffect(() => {
     function onKeyDown(event) {
-      if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
-      if (event.target instanceof Element && event.target.closest('button, input, select, textarea, a, [contenteditable]')) return
-      if (!canContinue(current.current.phase)) return
-      event.preventDefault()
-      advance()
+      handlePlayerSpace(event, playerRef.current, current.current.phase !== 'idle', advance)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -121,11 +114,16 @@ export function useScenePlayback(scene, actor) {
 
   return {
     ...state,
+    playerRef,
     canContinue: canContinue(state.phase),
-    start: () => { if (current.current.phase === 'idle') enterLine(0) },
+    start: () => { if (actor && current.current.phase === 'idle') enterLine(0) },
     restart: () => { release(); transition(initialState) },
     advance,
     replay: playAudio,
-    retry: () => { if (current.current.phase === 'speech-error') void generate(current.current.index) },
+    retry: () => {
+      if (current.current.phase !== 'speech-error') return
+      buffer.current.discard(current.current.index)
+      playReader(current.current.index)
+    },
   }
 }
