@@ -35,7 +35,17 @@ Open the URL Vite prints (usually `http://localhost:5173`). Vite proxies `/api` 
 
 ## Current scope
 
-Milestone 3.5 accepts UTF-8 `.txt` scripts, parses dialogue into a validated scene, and lets an actor choose their character and practise with an AI-generated reader voice. No microphone, recording, or persistence is used.
+Milestone 4 accepts UTF-8 `.txt` scripts and text-based `.pdf` scripts, parses dialogue into a validated scene, and lets an actor choose their character and practise with an AI-generated reader voice. No microphone, recording, or persistence is used.
+
+## Script upload and extraction
+
+Choose a TXT or PDF file up to **10 MiB**. The UI displays the selected filename, validates the extension/size, and preserves the analyzing state. TXT must use UTF-8; image-only/scanned PDFs are not supported. No OCR is performed.
+
+`POST /api/scenes/parse` still accepts the multipart field `script_file`. The route reads at most the upload limit plus one byte and closes the upload stream. The small `script_extraction` service validates the extension and size, then decodes UTF-8 or uses `pypdf` to extract PDF text from in-memory bytes. It uses pypdf layout extraction to reconstruct visual lines from positioned text objects, preserving vertical whitespace and indentation, then joins pages in document order with blank-line separators. The resulting string goes through the same OpenAI parser and Pydantic Scene validation as before. The parser, character selection, and playback do not know the source format. The synchronous route runs blocking extraction/parsing in FastAPI's thread pool. Uploaded PDFs are not permanently stored.
+
+Unsupported extensions return 415; oversized files return 413. Empty files, PDFs with no pages, encrypted/unreadable PDFs, and PDFs without usable extracted text return helpful 422 errors before any AI call. Textless PDFs explain that image-only/scanned documents are not supported. Encrypted PDFs must be exported as unencrypted files first. PDFs containing an existing text layer can be read, but extraction quality and reading order depend on the original PDF. No header/footer removal, dictionary-based spelling repairs, or speculative word/paragraph joining is attempted.
+
+The only added dependency is `pypdf==6.17.0`, a pure-Python PDF library. After pulling this milestone, run `pip install -r requirements.txt` in the backend virtual environment and restart the backend if necessary.
 
 ## Scene playback
 
@@ -98,3 +108,16 @@ Live reproduction found a WAV header bug, not a confirmed concurrency/rate-limit
 The writer now uses actual output frames and has a safe original-audio fallback for expected format/packing errors. A synthetic provider-header fixture and a complete mocked endpoint test reproduce the original failure without real API calls. The failed-prefetch behavior was also corrected: foreground playback can recover from transient cached/pending failures automatically, with one shared replacement request and no retry loop. The two-reader lookahead remains because concurrent requests were not the cause of the reproduced failure.
 
 For manual retesting, reload the frontend and ensure the backend has reloaded. Run several passes of the same three-character scene, including short/long lines and consecutive readers. Check that prefetched audio still starts promptly, reader lines no longer fail intermittently, actor lines stay silent, and replay makes no request. Temporarily interrupt the network during prefetch, restore it before advancing, and verify automatic recovery. Restart during loading/recovery to verify stale audio cannot play. If a failure remains, preserve the backend traceback or the new provider error metadata.
+
+Milestone 4 manual checks:
+
+- Upload a real multi-page, text-based audition PDF. Review the parsed character names and dialogue order, especially around page breaks, then select a character and run playback.
+- Repeat with an existing UTF-8 TXT script to verify the original workflow.
+- Try a scanned/image-only PDF and a password-protected PDF; confirm helpful errors and no parsing request to OpenAI.
+- Confirm filename display, loading behavior, and the 10 MiB validation message. There are no live OpenAI calls in the automated PDF tests.
+
+### Positioned-text PDF regression
+
+Some visually normal PDFs store each word or glyph in a separate text object. Default pypdf extraction can emit a newline after each object, so a sentence reaches the AI parser as many one-word lines. The supplied two-page audition PDF reproduced this: default extraction produced 227 nonempty lines, while layout mode reconstructed 24 visual lines containing 16 speaker turns. The malformed representation can encourage fragmented structured output; more output objects also plausibly increase generation time, but the original request latency was not instrumented.
+
+The ingestion service now uses `extraction_mode="layout"`, retaining vertical whitespace and including rotated text rather than silently dropping it. Truly blank pages are handled without attempting layout extraction. No text-level normalization is applied: real spaces, paragraph boundaries, labels, stage directions, and TXT input remain untouched. A generated regression fixture mimics separate positioned word/glyph objects and split contractions with both single-letter and full-name speakers. No copy of the user's script is included in the tests.

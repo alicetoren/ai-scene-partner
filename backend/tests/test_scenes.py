@@ -58,11 +58,11 @@ def test_parse_scene_returns_validated_scene() -> None:
 def test_parse_scene_rejects_unsupported_file_type() -> None:
     response = client.post(
         "/api/scenes/parse",
-        files={"script_file": ("scene.pdf", b"not a text script", "application/pdf")},
+        files={"script_file": ("scene.docx", b"not a text script", "application/octet-stream")},
     )
 
     assert response.status_code == 415
-    assert response.json()["detail"] == "Only plain-text (.txt) scripts are supported."
+    assert response.json()["detail"] == "Only TXT (.txt) and PDF (.pdf) scripts are supported."
 
 
 def test_parse_scene_rejects_empty_script() -> None:

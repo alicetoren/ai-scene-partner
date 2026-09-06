@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ScenePlayback from './components/ScenePlayback'
+import { validateScriptFile } from './upload'
 
 function App() {
   const [file, setFile] = useState(null)
@@ -11,13 +12,14 @@ function App() {
   function handleFileChange(event) {
     const nextFile = event.target.files?.[0] ?? null
     setFile(nextFile)
-    setError('')
+    setError(nextFile ? validateScriptFile(nextFile) : '')
   }
 
   async function handleAnalyze(event) {
     event.preventDefault()
-    if (!file) {
-      setError('Choose a .txt script before analyzing.')
+    const validationError = validateScriptFile(file)
+    if (validationError) {
+      setError(validationError)
       return
     }
 
@@ -50,11 +52,13 @@ function App() {
       <section className="status-card">
         <p className="eyebrow">AI Scene Partner</p>
         <h1>Turn your script into a practice scene.</h1>
-        <p className="intro">Upload a UTF-8 plain-text script to identify characters and dialogue.</p>
+        <p className="intro">Upload a TXT or text-based PDF script to identify characters and dialogue.</p>
 
         <form className="upload-form" onSubmit={handleAnalyze}>
-          <label htmlFor="script-file">Plain-text script (.txt)</label>
-          <input id="script-file" type="file" accept=".txt,text/plain" onChange={handleFileChange} />
+          <label htmlFor="script-file">Script (.txt or .pdf)</label>
+          <input id="script-file" type="file" accept=".txt,.pdf,text/plain,application/pdf" onChange={handleFileChange} disabled={status === 'loading'} aria-describedby="upload-help" />
+          <p id="upload-help" className="intro">Up to 10 MiB. TXT files must use UTF-8. Image-only/scanned PDFs are not supported yet.</p>
+          {file && <p>Selected file: <strong>{file.name}</strong></p>}
           <button type="submit" disabled={status === 'loading'}>
             {status === 'loading' ? 'Analyzing script…' : 'Analyze Script'}
           </button>
