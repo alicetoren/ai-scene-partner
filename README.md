@@ -4,8 +4,9 @@
 
 **[Try the public demo](https://ai-scene-partner.onrender.com/)**
 
-> **Demo vs. full application:** The public demo uses an original preloaded scene and prepared audio, so it makes no runtime OpenAI requests and requires no API key. The full application runs locally and supports TXT/PDF uploads, structured AI script parsing, configurable reader voices, and live text-to-speech generation.
+![AI Scene Partner public demo](docs/images/ai-scene-partner-demo.png)
 
+> **Demo vs. full application:** The public demo uses an original preloaded scene and prepared audio, so it makes no runtime OpenAI requests and requires no API key. The full application runs locally and supports TXT/PDF uploads, structured AI script parsing, configurable reader voices, and live text-to-speech generation.
 ## Features
 
 * Upload UTF-8 `.txt` or text-based `.pdf` scripts up to 10 MiB.
@@ -238,6 +239,8 @@ Vite proxies `/api` requests to the local FastAPI server.
 ## Full Local Workflow
 
 Once both services are running:
+
+![AI Scene Partner full local application](docs/images/ai-scene-partner-full-app.png)
 
 1. Upload a supported TXT or PDF script.
 2. Wait for the script to be extracted and parsed into structured dialogue.
