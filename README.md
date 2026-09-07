@@ -26,6 +26,8 @@
 
 The deployed demo uses **One More Minute**, an original eight-turn scene created for the project.
 
+![AI Scene Partner demo](docs/images/ai-scene-partner-demo.gif)
+
 It preserves the core rehearsal interaction:
 
 1. Choose either character as your role.
