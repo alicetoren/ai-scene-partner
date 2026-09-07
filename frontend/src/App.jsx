@@ -6,6 +6,7 @@ import { assignCharacterVoices, voicePlaybackKey } from './playback/voiceSetting
 function App() {
   const [file, setFile] = useState(null)
   const [scene, setScene] = useState(null)
+  const [sceneFilename, setSceneFilename] = useState('')
   const [selectedCharacter, setSelectedCharacter] = useState('')
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
@@ -43,6 +44,7 @@ function App() {
         throw new Error(data.detail || 'The script could not be analyzed.')
       }
 
+      setSceneFilename(file.name)
       setScene(data)
       setStatus('success')
     } catch (requestError) {
@@ -51,43 +53,61 @@ function App() {
     }
   }
 
+  const uploadForm = (
+    <form className="upload-form" onSubmit={handleAnalyze} aria-busy={status === 'loading'}>
+      <label className="upload-label" htmlFor="script-file">Upload your script</label>
+      <div className="file-picker">
+        <p className="file-types">TXT or PDF <span aria-hidden="true">·</span> Up to 10 MiB</p>
+        <input id="script-file" type="file" accept=".txt,.pdf,text/plain,application/pdf" onChange={handleFileChange} disabled={status === 'loading'} aria-describedby="upload-help" />
+        {file && <p className="selected-file">Selected: <strong>{file.name}</strong></p>}
+        <p id="upload-help" className="muted">TXT files must use UTF-8. Text-based PDFs only; image-only/scanned PDFs are not supported.</p>
+      </div>
+      <button type="submit" disabled={status === 'loading'}>
+        {status === 'loading' ? 'Preparing your scene…' : 'Prepare scene'}
+        {status !== 'loading' && <span aria-hidden="true"> →</span>}
+      </button>
+      <p className="muted">AI-generated reader voices. Your lines stay silent.</p>
+    </form>
+  )
+
   return (
-    <main className="page">
-      <section className="status-card">
-        <p className="eyebrow">AI Scene Partner</p>
-        <h1>Turn your script into a practice scene.</h1>
-        <p className="intro">Upload a TXT or text-based PDF script to identify characters and dialogue.</p>
-
-        <form className="upload-form" onSubmit={handleAnalyze}>
-          <label htmlFor="script-file">Script (.txt or .pdf)</label>
-          <input id="script-file" type="file" accept=".txt,.pdf,text/plain,application/pdf" onChange={handleFileChange} disabled={status === 'loading'} aria-describedby="upload-help" />
-          <p id="upload-help" className="intro">Up to 10 MiB. TXT files must use UTF-8. Image-only/scanned PDFs are not supported yet.</p>
-          {file && <p>Selected file: <strong>{file.name}</strong></p>}
-          <button type="submit" disabled={status === 'loading'}>
-            {status === 'loading' ? 'Analyzing script…' : 'Analyze Script'}
-          </button>
-        </form>
-
-        {error && <p className="status status--error" role="alert">{error}</p>}
-
-        {scene && (
-          <section className="scene" aria-live="polite">
-            <h2>{scene.title}</h2>
-            <label htmlFor="actor-character">I am playing</label>
-            <select
-              id="actor-character"
-              value={selectedCharacter}
-              onChange={(event) => setSelectedCharacter(event.target.value)}
-            >
-              <option value="">Select a character</option>
-              {scene.characters.map((character) => <option key={character} value={character}>{character}</option>)}
-            </select>
-
-            <h3>Detected characters</h3>
-            <div className="characters">
-              {scene.characters.map((character) => <span key={character}>{character}</span>)}
+    <div className="app-shell">
+      <header className="product-bar">
+        <div className="brand"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 10v4m4-8v12m4-15v18m4-15v12m4-8v4" /></svg></span>AI Scene Partner</div>
+        <p>A little support. More time in the scene.</p>
+      </header>
+      <main className="page">
+        <section className={scene ? 'scene-heading' : 'onboarding'} aria-label={scene ? 'Prepared scene' : 'Prepare your scene'}>
+          {scene ? (
+            <div><p className="eyebrow">Your scene</p><h1>{scene.title}</h1><p className="scene-meta">{sceneFilename} · {scene.characters.length} characters · {scene.lines.length} lines</p></div>
+          ) : (
+            <div className="welcome">
+              <p className="eyebrow">Meet your new line reader</p>
+              <h1>Ready to{' '}<br />run lines?</h1>
+              <p className="intro">Choose your character. Your AI scene partner reads the other parts.</p>
+              <ol className="workflow"><li><span>01 / Upload</span>Bring your script</li><li><span>02 / Choose</span>Pick your part</li><li><span>03 / Play</span>Start your scene</li></ol>
             </div>
-
+          )}
+          <details className={scene ? 'replace-script' : 'upload-panel'} open={scene ? undefined : true}>
+            <summary hidden={!scene}>Upload another script</summary>
+            {uploadForm}
+          </details>
+        </section>
+        <p className={status === 'success' ? 'sr-only' : 'analysis-status'} role="status">{status === 'loading' ? 'Preparing your scene… Characters and dialogue will appear when ready.' : status === 'success' ? 'Scene prepared. Choose your character below.' : ''}</p>
+        {error && <p className="status--error upload-error" role="alert">{error}</p>}
+        {scene && (
+          <div className="scene-workspace">
+            <section className="character-panel" aria-label="Your character">
+              <h2 className="eyebrow">Your cast</h2>
+              <div className="character-control">
+                <label htmlFor="actor-character">Who are you playing?</label>
+                <select id="actor-character" value={selectedCharacter} onChange={(event) => setSelectedCharacter(event.target.value)}>
+                  <option value="">Select a character</option>
+                  {scene.characters.map((character) => <option key={character} value={character}>{character}</option>)}
+                </select>
+                <p className="muted">Your lines stay silent.</p>
+              </div>
+            </section>
             <ScenePlayback
               key={voicePlaybackKey(selectedCharacter, voiceAssignments)}
               scene={scene}
@@ -95,10 +115,11 @@ function App() {
               voiceAssignments={voiceAssignments}
               onCategoryChange={(character, category) => setVoiceCategories((previous) => ({ ...previous, [character]: category }))}
             />
-          </section>
+          </div>
         )}
-      </section>
-    </main>
+      </main>
+      <footer className="product-footer"><span>Made for the work between auditions.</span><span>AI voices · Manual line progression</span></footer>
+    </div>
   )
 }
 
