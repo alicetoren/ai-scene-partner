@@ -149,3 +149,70 @@ Milestone 4.5 manual checks:
 - Start playback and verify category controls are locked. Restart, change a category, and start again; no old prefetched audio should play. Replay should make no new request.
 - Listen across several voices at the same device volume. Check the slightly brisker pace, softer/louder lines, quiet endings, and sharp consonants for clarity and lack of distortion. Perceived category fit and loudness still need human listening review.
 - Repeat the existing prefetch/retry/restart and real-PDF checks. Automated tests make no live OpenAI calls.
+
+## Static public sample demo
+
+The public demo is an explicit build variant: `VITE_DEMO_MODE=true`. Normal
+`npm run dev` and `npm run build` keep the local upload and backend workflow
+(unless that flag is explicitly set in your environment). No API key belongs in
+a frontend environment variable or static-host configuration.
+
+The demo opens **One More Minute**, an original eight-turn scene written for
+this project, with NORA and ELI as selectable roles. It hides upload and voice
+category controls. Both characters have fixed, prepared AI voices; the selected
+actor's lines stay silent. The same playback buffer handles manual progression,
+prefetch, replay, restart, and cancellation. Demo audio is loaded only from
+`demo/audio/line-1.wav` through `line-8.wav` under the Vite base path. Missing,
+empty, or invalid assets show an error; retries reload static files and never
+fall back to `/api` or OpenAI. A successful build alone does not prove the audio
+files exist or sound correct.
+
+### Prepare audio locally (one-time paid operation)
+
+No finished audio is included yet. From the repository root:
+
+```bash
+# Safe preview: no credentials loaded and no API calls.
+backend/.venv/bin/python scripts/generate_demo_audio.py
+
+# Run only when ready to make the eight paid TTS calls.
+backend/.venv/bin/python scripts/generate_demo_audio.py --generate
+```
+
+The generation command uses the existing backend environment/configuration and
+speech service, including WAV processing and the configured Neutral / Any
+palette: NORA uses slot 0, ELI slot 1. It makes **8 sequential speech calls** on a
+successful run, zero parsing calls, and no automatic retries. It refuses to
+overwrite an existing audio output directory. On failure it stops; earlier
+calls may still have been billed, and rerunning starts a new batch. Keep the
+configuration unchanged for the entire batch. Credentials and provider error
+bodies are not printed. Listen to every generated line before publishing.
+
+### Build, review, and publish static files
+
+```bash
+cd frontend
+npm run check:demo
+npm run build:demo
+npm run preview -- --host 127.0.0.1
+```
+
+`check:demo` must pass before release. Review the preview URL in both roles:
+actor silence, Space/Continue, replay, restart during loading/playback, and
+completion. Check a narrow screen and confirm the browser Network panel shows
+only static assets, with no `/api` or OpenAI requests. A missing audio file must
+show the prepared-audio error, including when Retry Reader Line is pressed.
+
+On your chosen free static host, publish **only `frontend/dist`**, not the
+repository or backend. For a host that builds from source, use root directory
+`frontend`, build command `npm ci && npm run check:demo && npm run build:demo`,
+and output directory `dist`; generated WAV files must be available to that
+build. For manual upload, upload the contents of `frontend/dist` after the local
+checks. Configure no backend service, API proxy, secrets, or generation function.
+Verify the host's current free-plan terms before publishing. For a site served
+under a subpath, build with `npm run build:demo -- --base=/your-subpath/`.
+The default build assumes the site is served at `/`.
+
+No runtime paid API usage is possible through the demo's audio loader. Final
+release still requires generating the eight real audio files, listening to both
+roles, passing the asset check, and verifying the final hosted static paths.

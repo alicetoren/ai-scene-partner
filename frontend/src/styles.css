@@ -149,3 +149,6 @@ input:disabled::file-selector-button { cursor: not-allowed; }
   .script-panel { position: static; }
   .script-scroll { height: clamp(180px, 42svh, 300px); }
 }
+
+.demo-notice { margin: 0 0 1.2rem; padding: 0.8rem 1rem; background: #eaf7f3; border: 1px solid var(--border); border-radius: 7px; font-size: 0.9375rem; }
+.reader-voices > h2, .reader-voices > .muted { grid-column: 1 / -1; }

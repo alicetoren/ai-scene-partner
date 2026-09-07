@@ -26,6 +26,7 @@ function waitForRetry(signal) {
 
 export function createReaderAudio(scene, actor, {
   request = fetch,
+  loadAudio,
   makeAudio = (url) => new Audio(url),
   createUrl = (blob) => URL.createObjectURL(blob),
   revokeUrl = (url) => URL.revokeObjectURL(url),
@@ -56,20 +57,25 @@ export function createReaderAudio(scene, actor, {
     const entry = { controller: new AbortController(), audio: null, url: null }
     entries.set(index, entry)
     entry.promise = (async () => {
-      const response = await request('/api/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: line.text, ...voiceAssignments[line.character] }),
-        signal: entry.controller.signal,
-      }).catch(rethrowNetworkFailure)
-      if (!response.ok) {
-        const data = await response.json().catch(() => null)
-        const error = new Error(typeof data?.detail === 'string' ? data.detail : 'Speech generation failed. Please retry this line.')
-        const hint = response.headers?.get('X-Speech-Retryable')
-        error.retryable = hint === 'true' || (!hint && [408, 429, 500, 502, 503, 504].includes(response.status))
-        throw error
+      let blob
+      if (loadAudio) {
+        blob = await loadAudio(line, entry.controller.signal)
+      } else {
+        const response = await request('/api/speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: line.text, ...voiceAssignments[line.character] }),
+          signal: entry.controller.signal,
+        }).catch(rethrowNetworkFailure)
+        if (!response.ok) {
+          const data = await response.json().catch(() => null)
+          const error = new Error(typeof data?.detail === 'string' ? data.detail : 'Speech generation failed. Please retry this line.')
+          const hint = response.headers?.get('X-Speech-Retryable')
+          error.retryable = hint === 'true' || (!hint && [408, 429, 500, 502, 503, 504].includes(response.status))
+          throw error
+        }
+        blob = await response.blob().catch(rethrowNetworkFailure)
       }
-      const blob = await response.blob().catch(rethrowNetworkFailure)
       if (entries.get(index) !== entry) throw new DOMException('Obsolete audio', 'AbortError')
       if (!blob.size) throw Object.assign(new Error('No audio was returned. Please retry this line.'), { retryable: true })
       entry.url = createUrl(blob)

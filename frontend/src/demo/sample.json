@@ -1,0 +1,14 @@
+{
+  "title": "One More Minute",
+  "characters": ["NORA", "ELI"],
+  "lines": [
+    {"id": 1, "character": "NORA", "text": "You moved the table."},
+    {"id": 2, "character": "ELI", "text": "Six inches. The door opens now."},
+    {"id": 3, "character": "NORA", "text": "It opened before. You just had to believe in it."},
+    {"id": 4, "character": "ELI", "text": "I'd like our first customer to need less faith."},
+    {"id": 5, "character": "NORA", "text": "What if nobody comes?"},
+    {"id": 6, "character": "ELI", "text": "Then we drink the coffee while it's hot."},
+    {"id": 7, "character": "NORA", "text": "And if somebody does?"},
+    {"id": 8, "character": "ELI", "text": "You say hello. I'll try not to move anything."}
+  ]
+}

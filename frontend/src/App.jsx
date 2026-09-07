@@ -1,12 +1,17 @@
 import { useState } from 'react'
+import sampleScene from './demo/sample.json'
+import { createDemoAudioLoader } from './demo/audio'
 import ScenePlayback from './components/ScenePlayback'
 import { validateScriptFile } from './upload'
 import { assignCharacterVoices, voicePlaybackKey } from './playback/voiceSettings'
 
+const demoMode = import.meta.env.VITE_DEMO_MODE === 'true'
+const demoAudio = demoMode ? createDemoAudioLoader(sampleScene, { baseUrl: import.meta.env.BASE_URL }) : undefined
+
 function App() {
   const [file, setFile] = useState(null)
-  const [scene, setScene] = useState(null)
-  const [sceneFilename, setSceneFilename] = useState('')
+  const [scene, setScene] = useState(demoMode ? sampleScene : null)
+  const [sceneFilename, setSceneFilename] = useState(demoMode ? 'Original sample scene' : '')
   const [selectedCharacter, setSelectedCharacter] = useState('')
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
@@ -21,6 +26,7 @@ function App() {
 
   async function handleAnalyze(event) {
     event.preventDefault()
+    if (demoMode) return
     const validationError = validateScriptFile(file)
     if (validationError) {
       setError(validationError)
@@ -77,6 +83,7 @@ function App() {
         <p>A little support. More time in the scene.</p>
       </header>
       <main className="page">
+        {demoMode && <p className="demo-notice"><strong>Sample demo</strong> · This public version uses an original prepared scene and bundled AI-generated audio. Choose either character to run lines.</p>}
         <section className={scene ? 'scene-heading' : 'onboarding'} aria-label={scene ? 'Prepared scene' : 'Prepare your scene'}>
           {scene ? (
             <div><p className="eyebrow">Your scene</p><h1>{scene.title}</h1><p className="scene-meta">{sceneFilename} · {scene.characters.length} characters · {scene.lines.length} lines</p></div>
@@ -88,10 +95,10 @@ function App() {
               <ol className="workflow"><li><span>01 / Upload</span>Bring your script</li><li><span>02 / Choose</span>Pick your part</li><li><span>03 / Play</span>Start your scene</li></ol>
             </div>
           )}
-          <details className={scene ? 'replace-script' : 'upload-panel'} open={scene ? undefined : true}>
+          {!demoMode && <details className={scene ? 'replace-script' : 'upload-panel'} open={scene ? undefined : true}>
             <summary hidden={!scene}>Upload another script</summary>
             {uploadForm}
-          </details>
+          </details>}
         </section>
         <p className={status === 'success' ? 'sr-only' : 'analysis-status'} role="status">{status === 'loading' ? 'Preparing your scene… Characters and dialogue will appear when ready.' : status === 'success' ? 'Scene prepared. Choose your character below.' : ''}</p>
         {error && <p className="status--error upload-error" role="alert">{error}</p>}
@@ -111,6 +118,8 @@ function App() {
             <ScenePlayback
               key={voicePlaybackKey(selectedCharacter, voiceAssignments)}
               scene={scene}
+              demoMode={demoMode}
+              loadAudio={demoAudio}
               actor={selectedCharacter}
               voiceAssignments={voiceAssignments}
               onCategoryChange={(character, category) => setVoiceCategories((previous) => ({ ...previous, [character]: category }))}

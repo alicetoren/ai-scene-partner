@@ -3,8 +3,8 @@ import { useScenePlayback } from '../hooks/useScenePlayback'
 import { VOICE_CATEGORIES } from '../playback/voiceSettings'
 import { dialogueScrollTop } from '../playback/dialogueScroll'
 
-export default function ScenePlayback({ scene, actor, voiceAssignments, onCategoryChange }) {
-  const playback = useScenePlayback(scene, actor, voiceAssignments)
+export default function ScenePlayback({ scene, actor, voiceAssignments, onCategoryChange, demoMode = false, loadAudio }) {
+  const playback = useScenePlayback(scene, actor, voiceAssignments, loadAudio)
   const scriptRef = useRef(null)
   const currentLineRef = useRef(null)
 
@@ -25,7 +25,7 @@ export default function ScenePlayback({ scene, actor, voiceAssignments, onCatego
   const messages = {
     idle: actor ? 'Ready when you are.' : 'Choose your character to start.',
     actor: 'Your turn. Take your time.',
-    loading: 'Preparing the reader’s audio…',
+    loading: demoMode ? 'Loading prepared audio…' : 'Preparing the reader’s audio…',
     playing: 'Listen — the reader is speaking.',
     'reader-ready': 'Reader finished. Your cue to continue.',
     'audio-blocked': 'Press Play Reader Line to start the audio.',
@@ -36,7 +36,13 @@ export default function ScenePlayback({ scene, actor, voiceAssignments, onCatego
   return (
     <div className="scene-player" ref={playback.playerRef}>
       <aside className="setup-panel" aria-label="Character and reader setup">
-        <fieldset className="reader-voices" disabled={playback.phase !== 'idle'}>
+        {demoMode ? (
+          <div className="reader-voices">
+            <h2>Prepared voices</h2>
+            {scene.characters.map((character) => <p key={character}><strong>{character}</strong><span className="role-note">{character === actor ? 'You · No AI speech' : 'AI reader · Prepared audio'}</span></p>)}
+            <p className="muted">Voices are fixed for this sample. Your selected character stays silent.</p>
+          </div>
+        ) : <fieldset className="reader-voices" disabled={playback.phase !== 'idle'}>
           <legend>Reader voices</legend>
           {scene.characters.map((character, index) => (
             <div className="voice-row" key={character}>
@@ -50,9 +56,9 @@ export default function ScenePlayback({ scene, actor, voiceAssignments, onCatego
               )}
             </div>
           ))}
-        </fieldset>
-        <p className="muted">Voice categories describe approximate sound, not character gender. Neutral / Any uses a mixed palette.</p>
-        {playback.phase !== 'idle' && <p className="muted">Restart scene to change reader voices.</p>}
+        </fieldset>}
+        {!demoMode && <p className="muted">Voice categories describe approximate sound, not character gender. Neutral / Any uses a mixed palette.</p>}
+        {!demoMode && playback.phase !== 'idle' && <p className="muted">Restart scene to change reader voices.</p>}
       </aside>
       <section className="script-panel" aria-label="Scene playback">
         <header className="script-heading"><h2>Scene dialogue</h2><span>{playback.index >= 0 ? `Line ${playback.index + 1} of ${scene.lines.length}` : `${scene.lines.length} lines`}</span></header>

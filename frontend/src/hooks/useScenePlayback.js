@@ -5,14 +5,14 @@ import { handlePlayerSpace } from '../playback/keyboard.js'
 const initialState = { phase: 'idle', index: -1, error: '' }
 const canContinue = (phase) => phase === 'actor' || phase === 'reader-ready'
 
-export function useScenePlayback(scene, actor, voiceAssignments) {
+export function useScenePlayback(scene, actor, voiceAssignments, loadAudio) {
   const [state, setState] = useState(initialState)
   // Synchronous guards prevent rapid clicks racing React's next render.
   const current = useRef(initialState)
   const resources = useRef({ generation: 0, audio: null })
   const buffer = useRef(null)
   const playerRef = useRef(null)
-  if (!buffer.current) buffer.current = createReaderAudio(scene, actor, { voiceAssignments })
+  if (!buffer.current) buffer.current = createReaderAudio(scene, actor, { voiceAssignments, loadAudio })
 
   function transition(next) {
     current.current = next
