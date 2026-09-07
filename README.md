@@ -1,29 +1,225 @@
 # AI Scene Partner
 
-An in-progress web application for actors to practise scenes, with React, FastAPI, structured AI script parsing, and reader speech playback.
+**AI Scene Partner is a full-stack rehearsal tool that turns uploaded scripts into interactive scene partners for actors.** Upload a TXT or PDF script, select your role, and rehearse while AI-generated reader voices perform the other characters' lines.
 
-## Prerequisites
+**[Try the public demo](https://ai-scene-partner.onrender.com/)**
 
-- Node.js 22 or later
-- Python 3.13 or later
+> **Demo vs. full application:** The public demo uses an original preloaded scene and prepared audio, so it makes no runtime OpenAI requests and requires no API key. The full application runs locally and supports TXT/PDF uploads, structured AI script parsing, configurable reader voices, and live text-to-speech generation.
 
-## Run the backend
+## Features
+
+* Upload UTF-8 `.txt` or text-based `.pdf` scripts up to 10 MiB.
+* Extract and reconstruct screenplay text from multi-page PDFs.
+* Parse unstructured scripts into validated characters and dialogue using structured LLM output.
+* Select the actor's role so their lines remain silent while the application reads the other characters.
+* Assign distinct reader voice categories to AI-read characters.
+* Prefetch upcoming speech to reduce pauses during rehearsal.
+* Replay reader lines without generating the audio again.
+* Recover cleanly from transient speech-generation failures.
+* Cancel or ignore stale asynchronous work when restarting or changing scenes.
+* Normalize generated WAV audio and conservatively trim trailing silence.
+* Advance through the scene with on-screen controls or the Space key.
+* Run backend and frontend tests without making live OpenAI API calls.
+
+## Public Demo
+
+The deployed demo uses **One More Minute**, an original eight-turn scene created for the project.
+
+It preserves the core rehearsal interaction:
+
+1. Choose either character as your role.
+2. Press **Start Scene**.
+3. Perform your own lines aloud.
+4. Advance when ready.
+5. Hear the other character respond using prepared reader audio.
+6. Replay lines or restart the scene at any time.
+
+The demo is intentionally a static build. Reader audio is generated in advance and loaded as local assets, so the deployed site contains:
+
+* no API key,
+* no backend service,
+* no live OpenAI requests, and
+* no runtime AI usage costs.
+
+The complete upload, parsing, voice-selection, and live TTS workflow is available when the project is run locally.
+
+## How It Works
+
+```text
+TXT / PDF Script
+       │
+       ▼
+ FastAPI Upload API
+       │
+       ▼
+Script Text Extraction
+  ├── UTF-8 decoding
+  └── PDF layout reconstruction
+       │
+       ▼
+Structured LLM Parsing
+       │
+       ▼
+Pydantic Scene Validation
+       │
+       ▼
+React Rehearsal Interface
+       │
+       ├── Actor lines → silent
+       │
+       └── Reader lines
+              │
+              ▼
+        Speech Generation
+              │
+              ▼
+       WAV Post-Processing
+              │
+              ▼
+     Prefetch / Playback Buffer
+```
+
+The extraction, parsing, playback, and speech layers are intentionally separated. Once a script has been converted into the validated `Scene` model, character selection and playback no longer need to know whether the original source was TXT or PDF.
+
+## Engineering Highlights
+
+### Structured script parsing
+
+Script text is sent through the OpenAI Responses API with a **strict JSON schema generated from the application's Pydantic `Scene` model**.
+
+The parser is instructed to handle common screenplay conventions such as wrapped dialogue, delivery parentheticals, continuation markers, scene directions, page numbers, and repeated character headings. The returned JSON is then independently validated before entering application state.
+
+This creates a clear boundary between probabilistic script interpretation and deterministic application logic:
+
+```text
+unstructured script → structured AI output → schema validation → deterministic playback
+```
+
+### PDF reconstruction
+
+Some screenplay PDFs store individual words or glyphs as separately positioned objects rather than ordinary text lines. Naive extraction can therefore split a single sentence into many fragments or return text in the wrong reading order.
+
+The ingestion layer uses `pdfplumber` to reconstruct visual lines from positioned text while preserving meaningful layout and page order. `pypdf` is retained for document validation and synthetic PDF tests.
+
+Image-only/scanned PDFs are deliberately rejected rather than passed through an unreliable OCR fallback.
+
+### Deterministic playback state
+
+The React playback layer models rehearsal as explicit states including actor turns, loading, playback, reader-ready, blocked audio, recoverable speech errors, and completion.
+
+Synchronous guards prevent rapid user actions from racing React renders. A generation counter and request cancellation prevent stale asynchronous responses from playing after a scene has been restarted or changed.
+
+Actor lines never generate speech.
+
+### Speech prefetch and bounded recovery
+
+Reader audio for upcoming lines is prefetched into a small buffer. In-flight promises and completed audio are shared, so foreground playback and prefetch do not generate duplicate requests for the same line.
+
+The backend disables automatic SDK retries because retrying a successful-but-interrupted TTS request could generate and bill the same line twice. Instead, the application classifies failures and owns a single bounded recovery attempt for transient errors.
+
+Permanent failures such as authentication, invalid configuration, or exhausted quota are surfaced without entering a retry loop.
+
+### Audio processing
+
+Reader speech is generated as WAV audio and post-processed on the backend using Python's standard library.
+
+The pipeline:
+
+* conservatively trims contiguous trailing near-silence,
+* preserves internal pauses and quiet dialogue endings,
+* measures active-window RMS,
+* applies bounded volume normalization,
+* maintains peak headroom,
+* preserves stereo balance, and
+* rebuilds WAV output headers using the actual frame count.
+
+Unsupported or unexpected audio-processing cases safely fall back to the original generated audio.
+
+### Reader voice assignment
+
+Each AI-read character can be assigned a **Feminine**, **Masculine**, or **Neutral / Any** presentation category.
+
+Voice assignment is deterministic: characters receive stable slots within the selected category rather than requiring an additional AI classification request. Character names and dialogue are never used to infer gender.
+
+These categories are application-level presentation preferences, not identity classifications.
+
+## Tech Stack
+
+### Frontend
+
+* React 19
+* Vite 6
+* JavaScript
+* CSS
+* Node.js built-in test runner
+
+### Backend
+
+* Python 3.13
+* FastAPI
+* Pydantic
+* OpenAI API
+* `pdfplumber`
+* `pypdf`
+
+### AI / Audio
+
+* Structured LLM script parsing
+* OpenAI text-to-speech
+* WAV post-processing
+* Deterministic speech prefetch and caching
+
+### Testing
+
+* pytest
+* Node.js built-in test runner
+* Mocked external AI boundaries
+
+## Running the Full Application Locally
+
+### Prerequisites
+
+* Node.js 22 or later
+* Python 3.13 or later
+* An OpenAI API key
+
+### 1. Configure and start the backend
 
 ```bash
 cd backend
+
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
 cp ../.env.example ../.env
-# Edit ../.env and replace the placeholder with your API key.
+```
+
+Edit the newly created `.env` file and add your OpenAI API key.
+
+Then start FastAPI:
+
+```bash
 uvicorn app.main:app --reload
 ```
 
-The API starts at `http://127.0.0.1:8000`. The OpenAI key is read only from the backend environment; copy the variable name from [`.env.example`](.env.example) if you prefer to use a local ignored `.env` file. Visit `http://127.0.0.1:8000/api/health` to check the backend directly.
+The API runs at:
 
-## Run the frontend
+```text
+http://127.0.0.1:8000
+```
 
-In another terminal:
+The health endpoint is available at:
+
+```text
+http://127.0.0.1:8000/api/health
+```
+
+The OpenAI API key is read only by the backend and should never be placed in a Vite/frontend environment variable.
+
+### 2. Start the frontend
+
+In a second terminal:
 
 ```bash
 cd frontend
@@ -31,164 +227,117 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`). Vite proxies `/api` requests to FastAPI.
+Open the URL printed by Vite, normally:
 
-## Current scope
+```text
+http://localhost:5173
+```
 
-Milestone 4.5 accepts UTF-8 `.txt` scripts and text-based `.pdf` scripts, parses dialogue into a validated scene, and lets an actor choose their character and practise with an AI-generated reader voice. No microphone, recording, or persistence is used.
+Vite proxies `/api` requests to the local FastAPI server.
 
-## Script upload and extraction
+## Full Local Workflow
 
-Choose a TXT or PDF file up to **10 MiB**. The UI displays the selected filename, validates the extension/size, and preserves the analyzing state. TXT must use UTF-8; image-only/scanned PDFs are not supported. No OCR is performed.
+Once both services are running:
 
-`POST /api/scenes/parse` still accepts the multipart field `script_file`. The route reads at most the upload limit plus one byte and closes the upload stream. The small `script_extraction` service validates the extension and size, then decodes UTF-8 or uses `pdfplumber` to extract PDF text from in-memory bytes. It uses coordinate-based pdfplumber layout extraction to reconstruct visual lines from positioned text objects, preserving vertical whitespace and indentation, then joins pages in document order with blank-line separators. The resulting string goes through the same OpenAI parser and Pydantic Scene validation as before. The parser, character selection, and playback do not know the source format. The synchronous route runs blocking extraction/parsing in FastAPI's thread pool. Uploaded PDFs are not permanently stored.
+1. Upload a supported TXT or PDF script.
+2. Wait for the script to be extracted and parsed into structured dialogue.
+3. Select the character you are performing.
+4. Choose reader voice categories for the remaining characters.
+5. Start the scene.
+6. Perform your own lines aloud.
+7. Press **Continue** or Space when ready.
+8. Listen to the generated reader lines.
+9. Replay, retry, or restart as needed.
 
-Unsupported extensions return 415; oversized files return 413. Empty files, PDFs with no pages, encrypted/unreadable PDFs, and PDFs without usable extracted text return helpful 422 errors before any AI call. Textless PDFs explain that image-only/scanned documents are not supported. Encrypted PDFs must be exported as unencrypted files first. PDFs containing an existing text layer can be read, but extraction quality and reading order depend on the original PDF. No header/footer removal, dictionary-based spelling repairs, or speculative word/paragraph joining is attempted.
+Upcoming reader lines are prefetched to reduce waiting during rehearsal.
 
-PDF ingestion uses `pdfplumber==0.11.10` for visual text reconstruction and retains `pypdf==6.17.0` for document validation and synthetic test PDFs. After pulling this milestone, run `pip install -r requirements.txt` in the backend virtual environment and restart the backend if necessary.
+## API Overview
 
-## Scene playback
+### Parse a scene
 
-Select your character and press **Start Scene**. The current line appears above the controls and is outlined in the dialogue list. Your lines remain silent; perform them and press **Continue**. The next two reader lines are generated ahead of time and played when reached; a line that is still loading waits for that same request. After playback, use **Continue** or **Replay Reader Line**. Space also continues while the player is running and focus is on the page body or within the player, outside interactive controls. It prevents page scrolling even during loading/playback; held-key repeats do not advance. Inputs, selects, buttons, links, and other page content retain their normal keyboard behavior. Progression is manual after every line, including consecutive reader lines.
+```text
+POST /api/scenes/parse
+```
 
-If autoplay is blocked, press **Play Reader Line**. A transient generation failure gets one automatic recovery attempt when the line is needed. If that fails, **Retry Reader Line** remains available without skipping dialogue. **Restart Scene** stops audio and returns to the ready state; press Start Scene for another run. Changing character or analyzing another script also clears playback. Audio is held only for the current reader line and up to two upcoming reader lines. Advancing discards older audio; restart, completion, and unmount clear the buffer. Restarting generates reader audio again. Canceling a browser request cannot guarantee cancellation of work already received by OpenAI.
+Accepts a multipart upload named `script_file`.
 
-## Speech configuration and architecture
+Supported inputs:
 
-The backend reads `OPENAI_API_KEY`, `OPENAI_MODEL` (parsing, default `gpt-5-mini`), `OPENAI_TTS_MODEL` (default `gpt-4o-mini-tts`), `OPENAI_TTS_VOICE` (default `marin`), and `OPENAI_TTS_VOICES` (ordered palette, default `marin,cedar,coral,ash`). Existing `.env` files need no additional values unless overriding defaults. Never put the API key in a frontend/Vite variable.
+* UTF-8 `.txt`
+* text-based `.pdf`
+* maximum size: 10 MiB
 
-React compares the current line's character with the selected actor. Only reader text, a user-selected category, and its deterministic slot are posted as `{"text":"Hello.","voice_category":"feminine","voice_index":1}` to `/api/speech`. The endpoint validates a nonempty string of up to 4096 characters, delegates to a small speech service, and returns WAV bytes with `audio/wav` and `Cache-Control: no-store`. Provider limits can also reject text; the UI reports a controlled failure. The synchronous route runs in FastAPI's thread pool. Individual speech calls have a 30-second timeout and SDK retries disabled. The frontend owns a single bounded recovery attempt, so retry layers cannot multiply requests.
+The endpoint extracts the source text and returns a validated structured scene.
 
-The playback hook holds an explicit phase and line index. Phases are idle, actor, loading, playing, reader-ready, audio-blocked, speech-error, and complete. It uses synchronous guards against duplicate actions, an AbortController for pending requests, and a generation counter to ignore stale asynchronous results. Audio generation starts from user actions, avoiding duplicate requests from React StrictMode effect replay. Object URLs are revoked when no longer needed. The buffer stores both in-flight promises and prepared audio elements by line index, so foreground playback and prefetch share work. Failed prefetches do not retry in the background. When the line is needed, a transient failure gets one fresh on-demand request after a cancelable 500 ms backoff. Concurrent consumers share the recovery promise; a second failure reaches the controlled UI error. The same one-recovery limit applies to a cold on-demand request. Permanent errors (including invalid requests, authentication, configuration, and exhausted quota) do not automatically retry. The server communicates transient provider failures through `X-Speech-Retryable` and logs only error type, status/code, and request ID, never dialogue or credentials. No requests happen before Start; the first reader may still need to load. Prefetch may generate up to two lines that are never played if the user stops early.
+### Generate reader speech
 
-## Reader voices and delivery
+```text
+POST /api/speech
+```
 
-After selecting your role, use **Reader voices** to choose **Feminine**, **Masculine**, or **Neutral / Any** for each AI-read character. Your own role is labeled **You · No AI speech**. Settings are locked during a run; **Restart Scene** enables editing again. Categories are normal React state, reset only when analyzing another script. Changing actor selection preserves them.
+Reader requests contain the line text together with its deterministic voice category and slot. Successful responses return WAV audio.
 
-These are app-curated voice-presentation preferences, not gender identities or official OpenAI gender classifications. No character name or dialogue is used to infer gender. Neutral / Any means a mixed palette, not a guarantee of an androgynous sound. The [official speech documentation](https://developers.openai.com/api/docs/guides/text-to-speech) lists supported voice names without assigning gender categories.
+Only reader dialogue is sent for speech generation; the selected actor's lines remain silent.
 
-| Category | Default palette | Backend configuration |
-| --- | --- | --- |
-| Neutral / Any | marin, cedar, coral, ash | `OPENAI_TTS_VOICE` first, then `OPENAI_TTS_VOICES` |
-| Feminine | coral, nova, shimmer | `OPENAI_TTS_FEMININE_VOICES` |
-| Masculine | cedar, onyx, echo | `OPENAI_TTS_MASCULINE_VOICES` |
+## Configuration
 
-React walks every character in scene order, including the actor, and assigns a consecutive slot within each selected category. The backend chooses that slot modulo the category palette length. This gives distinct voices within a category until the palette wraps. Any can overlap the other palettes. Changing the actor does not change slots; editing category choices can reassign slots before a new run. Backend palettes are deduplicated and validated; unknown voices or an empty category palette return a controlled configuration error. Existing clients that omit `voice_category` still use Any.
+The backend supports configuration for:
 
-The player key includes actor and voice assignments. A settings change remounts the player and runs the existing cleanup, aborting old requests and revoking audio URLs. Each cache therefore belongs to one fixed voice configuration. Prefetch, recovery, and replay all use that same assignment; no additional AI assignment call is made. The AI parser and Scene schema contain no voice settings.
+* `OPENAI_API_KEY`
+* `OPENAI_MODEL`
+* `OPENAI_TTS_MODEL`
+* `OPENAI_TTS_VOICE`
+* `OPENAI_TTS_VOICES`
+* category-specific TTS voice palettes
 
-`TTS_READER_INSTRUCTIONS` and `TTS_SPEED` in backend configuration centralize delivery. The reader is clear, understated, and lightly brisk without rushing or theatrical emphasis. Speed is now `1.05` rather than the API default `1.0`; there is no user-facing pace control. The default `gpt-4o-mini-tts` supports delivery instructions. Alternate model overrides must support those instructions and the chosen palette.
+The default parsing model is `gpt-5-mini`, and the default speech model is `gpt-4o-mini-tts`.
 
-### Volume consistency
+See `.env.example` for the environment-variable template.
 
-After tail trimming, `normalize_volume` processes 16-bit PCM WAV audio using only Python's standard library. It measures RMS in active 20 ms windows (excluding windows below -50 dBFS), targets -20 dBFS active RMS, and applies one gain to the entire line. Gain is limited to 0.5–2.0 (roughly ±6 dB), with an additional -1 dBFS sample-peak ceiling. Silence is not amplified; stereo channels share a gain so their balance is preserved. The original waveform dynamics and timing remain intact, with no compressor or hard clipping.
+## Testing
 
-This is approximate level matching, not perceptually weighted LUFS normalization. Voice timbre and delivery can still produce perceived loudness differences; headroom and bounded gain take priority over exactly hitting the target. Unsupported audio or expected processing errors fall back to the already-trimmed input. WAV output headers use the actual frame count, preserving the prior unknown-length-header reliability fix. Prefetch and replay use these same processed bytes, without a client audio-processing layer or new dependency.
-
-## Post-line silence
-
-The original frontend transitioned directly from the audio `ended` event to reader-ready, without a timer. It waited through the entire generated file, including trailing silence. Three manually generated samples using the original MP3 settings had approximately 0.22, 0.41, and 0.07 seconds of trailing samples below -60 dBFS. These confirm an audio-tail contribution but do not reproduce the entire reported 0.5–1.5-second delay. Browser/output-device latency and other generated lines remain manual verification items.
-
-Speech now uses WAV, which can be inspected with Python's standard library without introducing a codec dependency. The backend trims only a contiguous near-silent tail of at least 300 ms, keeping 150 ms after the last sample above approximately -60 dBFS in any channel. It preserves internal pauses, quiet endings above that conservative threshold, short tails, and all-silent audio. Provider WAVs may use unknown-length headers. Output headers are rebuilt using the actual downloaded frame count, even when no silence is trimmed. Unrecognized formats pass through unchanged; optional post-processing errors return the original audio and log an error type. Completion still follows the actual audio end; there is no timer that guesses when dialogue has finished. WAV is larger than MP3, a tradeoff mitigated by the small prefetch window. Check soft endings and interrupted lines by ear; waveform thresholds cannot prove perceptual silence for every possible recording.
-
-## Verification
+Backend tests:
 
 ```bash
 cd backend
 .venv/bin/python -m pytest -q
-cd ../frontend
+```
+
+Frontend tests:
+
+```bash
+cd frontend
 npm test
+```
+
+Production frontend build:
+
+```bash
 npm run build
 ```
 
-Automated tests mock external AI boundaries; no real API requests are made. Frontend deterministic tests use Node’s built-in test runner without new dependencies. They cover the prefetch buffer, actor exclusion, voice indices, cleanup, retry, and keyboard ownership. Backend tests cover the speech contract, voice mapping, provider failures, and conservative audio trimming. Browser playback itself still needs manual verification.
+Automated tests mock external AI boundaries, so the test suite does not make live OpenAI requests.
 
-Manual smoke test with a configured API key:
+Coverage includes areas such as:
 
-1. Upload a short script with alternating characters and consecutive actor/reader lines, then select your character.
-2. Start, check the current-line indicator, listen to reader audio, and verify actor turns remain silent. Use Continue and Space to reach completion.
-3. Replay a reader line and check the browser Network panel: replay should make no additional `/api/speech` request. Actor lines should never cause a speech request.
-4. Try rapid clicks, restart during loading/playback, and change character during playback. Old audio should stop and stale responses should not play.
-5. Check autoplay recovery in your browser and use offline mode to check speech failure/retry. Confirm Space does not interfere with inputs, selects, or buttons.
+* script extraction,
+* scene parsing boundaries,
+* speech API behavior,
+* voice assignment,
+* provider failures,
+* audio processing,
+* reader prefetch,
+* retry behavior,
+* resource cleanup,
+* actor-line exclusion,
+* keyboard interaction, and
+* static demo audio.
 
-Milestone 3.5 manual checks:
+Browser audio behavior and generated voice quality are also manually tested because they cannot be fully validated through deterministic unit tests.
 
-- Use the three-character scene again: confirm distinct, consistent reader voices and grounded conversational delivery.
-- While an actor is speaking, check that upcoming requests are already underway. Advance after they finish and confirm immediate playback with no second request for that line. Repeat for consecutive reader lines and multiple actor lines between readers.
-- Replay should use the existing audio; rapid Continue/Space presses during loading should neither scroll nor create duplicate requests.
-- Compare short words, soft final consonants, and interrupted lines for shorter end pauses without audible clipping.
-- Restart or change character with prefetch pending; confirm no obsolete audio plays. Finish a scene and check replay, retry, and completion still behave as documented.
+## Static Demo Build
 
-## Milestone 3.5 reliability regression
-
-Live reproduction found a WAV header bug, not a confirmed concurrency/rate-limit issue. OpenAI returned finite audio with `0xffffffff` data-size placeholders, parsed as 2,147,483,647 frames. On lines with enough trailing silence, the old trimming writer copied that frame count and overflowed RIFF's 32-bit size field (`struct.error`). Lines without a long tail bypassed the writer, explaining the intermittent failures and apparent success on retry. The same exception occurred with sequential calls. Milestone 3 used MP3 without this processing step.
-
-The writer now uses actual output frames and has a safe original-audio fallback for expected format/packing errors. A synthetic provider-header fixture and a complete mocked endpoint test reproduce the original failure without real API calls. The failed-prefetch behavior was also corrected: foreground playback can recover from transient cached/pending failures automatically, with one shared replacement request and no retry loop. The two-reader lookahead remains because concurrent requests were not the cause of the reproduced failure.
-
-For manual retesting, reload the frontend and ensure the backend has reloaded. Run several passes of the same three-character scene, including short/long lines and consecutive readers. Check that prefetched audio still starts promptly, reader lines no longer fail intermittently, actor lines stay silent, and replay makes no request. Temporarily interrupt the network during prefetch, restore it before advancing, and verify automatic recovery. Restart during loading/recovery to verify stale audio cannot play. If a failure remains, preserve the backend traceback or the new provider error metadata.
-
-Milestone 4 manual checks:
-
-- Upload a real multi-page, text-based audition PDF. Review the parsed character names and dialogue order, especially around page breaks, then select a character and run playback.
-- Repeat with an existing UTF-8 TXT script to verify the original workflow.
-- Try a scanned/image-only PDF and a password-protected PDF; confirm helpful errors and no parsing request to OpenAI.
-- Confirm filename display, loading behavior, and the 10 MiB validation message. There are no live OpenAI calls in the automated PDF tests.
-
-### Positioned-text PDF regression
-
-Some visually normal PDFs store each word or glyph in a separate text object. Default pypdf extraction can emit a newline after each object, so a sentence reaches the AI parser as many one-word lines. The supplied two-page audition PDF reproduced this: default extraction produced 227 nonempty lines, while layout mode reconstructed 24 visual lines containing 16 speaker turns. The malformed representation can encourage fragmented structured output; more output objects also plausibly increase generation time, but the original request latency was not instrumented.
-
-The ingestion service now uses pdfplumber's coordinate-based layout reconstruction. A second, edited screenplay PDF demonstrated that pypdf layout could omit blocks and append character headers to dialogue; plain mode also misordered text. Both real PDFs were checked with the replacement. Only page-margin whitespace and right padding are removed; relative indentation and internal blank lines remain. No spelling repair or screenplay regex parsing is performed, and TXT is unchanged. Synthetic tests cover positioned glyphs and drawing commands stored in reverse visual order, with single-letter and full-name speakers.
-
-The AI instructions explicitly group wrapped dialogue and parentheticals under their preceding heading, canonicalize continuation suffixes, exclude action/page numbers, and require checking all turns in source order. The Scene schema validates structure, not semantic completeness: mocked tests verify the request/response boundary, while a bounded manual live parse checks actual model behavior.
-
-Milestone 4.5 manual checks:
-
-- Parse either PDF or TXT, choose your role, and set reader categories. Confirm no voice is inferred from a character name and no TTS is requested for your role.
-- Give two readers the same category and confirm distinct voices; change the actor role and check that remaining reader voices/settings stay stable.
-- Start playback and verify category controls are locked. Restart, change a category, and start again; no old prefetched audio should play. Replay should make no new request.
-- Listen across several voices at the same device volume. Check the slightly brisker pace, softer/louder lines, quiet endings, and sharp consonants for clarity and lack of distortion. Perceived category fit and loudness still need human listening review.
-- Repeat the existing prefetch/retry/restart and real-PDF checks. Automated tests make no live OpenAI calls.
-
-## Static public sample demo
-
-The public demo is an explicit build variant: `VITE_DEMO_MODE=true`. Normal
-`npm run dev` and `npm run build` keep the local upload and backend workflow
-(unless that flag is explicitly set in your environment). No API key belongs in
-a frontend environment variable or static-host configuration.
-
-The demo opens **One More Minute**, an original eight-turn scene written for
-this project, with NORA and ELI as selectable roles. It hides upload and voice
-category controls. Both characters have fixed, prepared AI voices; the selected
-actor's lines stay silent. The same playback buffer handles manual progression,
-prefetch, replay, restart, and cancellation. Demo audio is loaded only from
-`demo/audio/line-1.wav` through `line-8.wav` under the Vite base path. Missing,
-empty, or invalid assets show an error; retries reload static files and never
-fall back to `/api` or OpenAI. A successful build alone does not prove the audio
-files exist or sound correct.
-
-### Prepare audio locally (one-time paid operation)
-
-No finished audio is included yet. From the repository root:
-
-```bash
-# Safe preview: no credentials loaded and no API calls.
-backend/.venv/bin/python scripts/generate_demo_audio.py
-
-# Run only when ready to make the eight paid TTS calls.
-backend/.venv/bin/python scripts/generate_demo_audio.py --generate
-```
-
-The generation command uses the existing backend environment/configuration and
-speech service, including WAV processing and the configured Neutral / Any
-palette: NORA uses slot 0, ELI slot 1. It makes **8 sequential speech calls** on a
-successful run, zero parsing calls, and no automatic retries. It refuses to
-overwrite an existing audio output directory. On failure it stops; earlier
-calls may still have been billed, and rerunning starts a new batch. Keep the
-configuration unchanged for the entire batch. Credentials and provider error
-bodies are not printed. Listen to every generated line before publishing.
-
-### Build, review, and publish static files
+The public demo is built separately from the full local application:
 
 ```bash
 cd frontend
@@ -197,22 +346,44 @@ npm run build:demo
 npm run preview -- --host 127.0.0.1
 ```
 
-`check:demo` must pass before release. Review the preview URL in both roles:
-actor silence, Space/Continue, replay, restart during loading/playback, and
-completion. Check a narrow screen and confirm the browser Network panel shows
-only static assets, with no `/api` or OpenAI requests. A missing audio file must
-show the prepared-audio error, including when Retry Reader Line is pressed.
+Demo mode is enabled explicitly with `VITE_DEMO_MODE=true`.
 
-On your chosen free static host, publish **only `frontend/dist`**, not the
-repository or backend. For a host that builds from source, use root directory
-`frontend`, build command `npm ci && npm run check:demo && npm run build:demo`,
-and output directory `dist`; generated WAV files must be available to that
-build. For manual upload, upload the contents of `frontend/dist` after the local
-checks. Configure no backend service, API proxy, secrets, or generation function.
-Verify the host's current free-plan terms before publishing. For a site served
-under a subpath, build with `npm run build:demo -- --base=/your-subpath/`.
-The default build assumes the site is served at `/`.
+Prepared reader audio lives under the static demo assets and is loaded through the same playback system used by the full application. Missing or invalid assets produce a controlled error and never fall back to a live API request.
 
-No runtime paid API usage is possible through the demo's audio loader. Final
-release still requires generating the eight real audio files, listening to both
-roles, passing the asset check, and verifying the final hosted static paths.
+The demo therefore exercises the rehearsal UI, playback state machine, prefetch behavior, replay, restart, and cancellation without exposing credentials or creating runtime API costs.
+
+## Current Limitations
+
+* The full AI workflow currently runs locally rather than as a public hosted backend.
+* The public deployment is a fixed sample scene rather than an arbitrary-script upload service.
+* Scanned or image-only PDFs are not supported because OCR is not implemented.
+* PDF extraction quality depends on the source document's underlying text layer and layout.
+* Scene progression is currently manual; the application does not yet listen for the actor to finish speaking.
+* The application does not currently record self-tapes.
+* Scenes and user settings are not persisted between sessions.
+* Generated speech requires an OpenAI API key and may incur API usage costs when running the full application locally.
+
+## Potential Next Steps
+
+* Add speech recognition for hands-free detection of completed actor lines.
+* Add integrated self-tape recording and playback.
+* Support persistent scenes and rehearsal settings.
+* Expand script-format handling and investigate OCR for scanned scripts.
+* Add user-adjustable reader pacing and rehearsal controls.
+* Explore a hosted authenticated version of the complete upload-and-generation workflow.
+
+## Security and Privacy
+
+* API credentials remain exclusively on the backend.
+* `.env` files are excluded from Git.
+* Uploaded PDFs are processed in memory and are not permanently stored by the application.
+* Error logging avoids dialogue text, credentials, and provider response bodies.
+* The public demo contains no API credentials and performs no runtime OpenAI requests.
+
+## Project Status
+
+The core rehearsal workflow is implemented and tested:
+
+**script upload → extraction → structured parsing → role selection → reader voice configuration → prefetched speech playback**
+
+The public deployment demonstrates the rehearsal experience using an original scene and prepared audio, while the complete dynamic workflow is available locally.
