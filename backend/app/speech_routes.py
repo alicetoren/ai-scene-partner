@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
+from app.config import VoiceCategory
 
 from app.services.speech import SpeechGenerationError, SpeechService, get_speech_service
 
@@ -11,6 +12,7 @@ class SpeechRequest(BaseModel):
 
     text: str = Field(min_length=1, max_length=4096)
     voice_index: int = Field(default=0, ge=0, strict=True)
+    voice_category: VoiceCategory = "any"
 
 
 router = APIRouter(prefix="/api", tags=["speech"])
@@ -23,7 +25,7 @@ def generate_speech(
 ) -> Response:
     # A sync route keeps the blocking SDK call off the async event loop.
     try:
-        audio = service.generate(request.text, request.voice_index)
+        audio = service.generate(request.text, request.voice_index, request.voice_category)
     except RuntimeError as error:
         raise HTTPException(503, "Speech is not configured on the server.", headers={"X-Speech-Retryable": "false"}) from error
     except SpeechGenerationError as error:

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createReaderAudio } from '../src/playback/readerAudio.js'
+import { assignCharacterVoices, voicePlaybackKey } from '../src/playback/voiceSettings.js'
 
 const scene = {
   characters: ['ACTOR', 'B', 'C'],
@@ -14,7 +15,7 @@ const scene = {
   ],
 }
 
-function harness(actor = 'ACTOR', wait = async () => {}) {
+function harness(actor = 'ACTOR', wait = async () => {}, voiceAssignments) {
   const calls = []
   const urls = []
   const revoked = []
@@ -31,6 +32,7 @@ function harness(actor = 'ACTOR', wait = async () => {}) {
     revokeUrl: (url) => revoked.push(url),
     makeAudio: () => ({ pause() { this.stopped = true }, removeAttribute() {}, load() {} }),
     wait,
+    voiceAssignments,
   })
   return { buffer, calls, urls, revoked }
 }
@@ -245,6 +247,57 @@ test('network failure while downloading audio can recover without duplicate requ
   calls[0].disconnectBody()
   await new Promise(setImmediate)
   assert.equal(calls.length, 2)
+  calls[1].finish()
+  await playback.promise
+  buffer.clear()
+})
+
+test('category and slot reach TTS consistently across actor selections and repeated lines', () => {
+  const assignments = assignCharacterVoices(scene.characters, { B: 'masculine', C: 'masculine' })
+  const first = harness('ACTOR', undefined, assignments)
+  first.buffer.ensure(1)
+  first.buffer.ensure(2)
+  first.buffer.ensure(4)
+  assert.deepEqual(first.calls.map(({ body }) => [body.voice_category, body.voice_index]), [
+    ['masculine', 0], ['masculine', 1], ['masculine', 0],
+  ])
+  const second = harness('C', undefined, assignments)
+  second.buffer.ensure(1)
+  assert.deepEqual(second.calls[0].body, first.calls[0].body)
+  assert.equal(second.buffer.ensure(2), null)
+  first.buffer.clear()
+  second.buffer.clear()
+})
+
+test('category changes invalidate the player key and old audio cannot populate the new cache', async () => {
+  const oldSettings = assignCharacterVoices(scene.characters)
+  const newSettings = assignCharacterVoices(scene.characters, { B: 'feminine' })
+  assert.notEqual(voicePlaybackKey('ACTOR', oldSettings), voicePlaybackKey('ACTOR', newSettings))
+  const old = harness('ACTOR', undefined, oldSettings)
+  const pending = old.buffer.ensure(1)
+  // This is the cleanup invoked by the keyed player's effect on unmount.
+  old.buffer.clear()
+  const fresh = harness('ACTOR', undefined, newSettings)
+  const prepared = fresh.buffer.ensure(1)
+  assert.equal(fresh.calls[0].body.voice_category, 'feminine')
+  assert.equal(old.calls[0].signal.aborted, true)
+  old.calls[0].finish()
+  await assert.rejects(pending.promise, { name: 'AbortError' })
+  assert.equal(old.urls.length, 0)
+  fresh.calls[0].finish()
+  assert.equal(await prepared.promise, fresh.buffer.forPlayback(1).audio)
+  assert.equal(fresh.calls.length, 1) // Replay/foreground still shares generated audio.
+  fresh.buffer.clear()
+})
+
+test('recovery retains the category and slot of the original reader request', async () => {
+  const assignments = assignCharacterVoices(scene.characters, { B: 'feminine' })
+  const { buffer, calls } = harness('ACTOR', undefined, assignments)
+  const playback = buffer.forPlayback(1)
+  calls[0].fail()
+  await new Promise(setImmediate)
+  assert.deepEqual(calls[0].body, calls[1].body)
+  assert.equal(calls[1].body.voice_category, 'feminine')
   calls[1].finish()
   await playback.promise
   buffer.clear()

@@ -3,8 +3,8 @@ import logging
 
 from openai import APIConnectionError, OpenAI, OpenAIError
 
-from app.config import TTS_READER_INSTRUCTIONS, get_character_voice, get_openai_api_key, get_tts_model
-from app.services.audio import trim_silent_tail
+from app.config import TTS_READER_INSTRUCTIONS, TTS_SPEED, VoiceCategory, get_character_voice, get_openai_api_key, get_tts_model
+from app.services.audio import normalize_volume, trim_silent_tail
 
 
 logger = logging.getLogger(__name__)
@@ -19,14 +19,14 @@ class SpeechGenerationError(Exception):
 
 
 class SpeechService(Protocol):
-    def generate(self, text: str, voice_index: int = 0) -> bytes: ...
+    def generate(self, text: str, voice_index: int = 0, voice_category: VoiceCategory = "any") -> bytes: ...
 
 
 class OpenAISpeechService:
-    def generate(self, text: str, voice_index: int = 0) -> bytes:
+    def generate(self, text: str, voice_index: int = 0, voice_category: VoiceCategory = "any") -> bytes:
         # Disable automatic retries: a retry could generate and bill the same line twice.
         api_key = get_openai_api_key()
-        voice = get_character_voice(voice_index)
+        voice = get_character_voice(voice_index, voice_category)
         try:
             with OpenAI(api_key=api_key, timeout=30.0, max_retries=0) as client:
                 response = client.audio.speech.create(
@@ -34,6 +34,7 @@ class OpenAISpeechService:
                     voice=voice,
                     input=text,
                     instructions=TTS_READER_INSTRUCTIONS,
+                    speed=TTS_SPEED,
                     response_format="wav",
                 )
                 audio = response.content
@@ -54,7 +55,7 @@ class OpenAISpeechService:
         if not audio:
             logger.warning("Speech provider returned empty audio")
             raise SpeechGenerationError(retryable=True)
-        return trim_silent_tail(audio)
+        return normalize_volume(trim_silent_tail(audio))
 
 
 def get_speech_service() -> SpeechService:

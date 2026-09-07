@@ -1,7 +1,8 @@
 import { useScenePlayback } from '../hooks/useScenePlayback'
+import { VOICE_CATEGORIES } from '../playback/voiceSettings'
 
-export default function ScenePlayback({ scene, actor }) {
-  const playback = useScenePlayback(scene, actor)
+export default function ScenePlayback({ scene, actor, voiceAssignments, onCategoryChange }) {
+  const playback = useScenePlayback(scene, actor, voiceAssignments)
   const line = scene.lines[playback.index]
   const messages = {
     idle: actor ? 'Ready. Start the scene when you are comfortable.' : 'Select your character to start.',
@@ -16,6 +17,27 @@ export default function ScenePlayback({ scene, actor }) {
 
   return (
     <div className="scene-player" ref={playback.playerRef}>
+      <fieldset className="reader-voices" disabled={playback.phase !== 'idle'}>
+        <legend>Reader voices</legend>
+        <p className="intro">Categories describe an approximate voice sound, not a character’s gender. “Any” uses a mixed palette.</p>
+        {scene.characters.map((character, index) => (
+          <div className="voice-row" key={character}>
+            {character === actor ? <span><strong>{character}</strong> · You · No AI speech</span> : (
+              <>
+                <label htmlFor={`reader-voice-${index}`}><strong>{character}</strong> · AI reader</label>
+                <select
+                  id={`reader-voice-${index}`}
+                  value={voiceAssignments[character].voice_category}
+                  onChange={(event) => onCategoryChange(character, event.target.value)}
+                >
+                  {VOICE_CATEGORIES.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </>
+            )}
+          </div>
+        ))}
+        {playback.phase !== 'idle' && <p>Restart Scene to change reader voices.</p>}
+      </fieldset>
       <section className="playback" aria-label="Scene playback">
         <p className="intro">The reader voice is AI-generated. Advance manually after each line.</p>
         <p role="status">{messages[playback.phase]}</p>

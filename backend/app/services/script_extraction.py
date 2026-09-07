@@ -2,6 +2,9 @@
 
 from io import BytesIO
 from pathlib import Path
+from textwrap import dedent
+
+import pdfplumber
 
 from pypdf import PdfReader
 
@@ -42,15 +45,16 @@ def extract_pdf_text(contents: bytes) -> str:
             raise ScriptUploadError("Encrypted PDFs are not supported. Upload an unencrypted PDF or a TXT script.")
         if not reader.pages:
             raise ScriptUploadError("The PDF contains no pages.")
-        # Group positioned glyphs/words into visual lines. Plain extraction can put
-        # every text object on a new line, even when a PDF looks normal on screen.
-        # Keep vertical whitespace, indentation, and page boundaries; do not guess
-        # which spaces or wrapped lines should be deleted or merged.
-        text = "\n\n".join(
-            (page.extract_text(extraction_mode="layout", layout_mode_strip_rotated=False) or "")
-            if "/Contents" in page else ""  # Truly blank pages have no content stream.
-            for page in reader.pages
-        )
+        # Reconstruct visual coordinates rather than PDF drawing-command order.
+        # pypdf layout can drop/reorder blocks in edited screenplay PDFs.
+        with pdfplumber.open(BytesIO(contents)) as document:
+            pages = []
+            for page in document.pages:
+                layout = page.extract_text(layout=True) or ""
+                # Remove page margins/padding only; retain relative indentation,
+                # blank lines, punctuation, and all screenplay markers for parsing.
+                pages.append(dedent("\n".join(line.rstrip() for line in layout.splitlines())).strip("\n"))
+            text = "\n\n".join(pages)
     except ScriptUploadError:
         raise
     except Exception as error:

@@ -1,3 +1,5 @@
+import { assignCharacterVoices } from './voiceSettings.js'
+
 // A scene-local sliding window, not a persistent audio cache.
 const LOOKAHEAD_READERS = 2
 
@@ -28,6 +30,7 @@ export function createReaderAudio(scene, actor, {
   createUrl = (blob) => URL.createObjectURL(blob),
   revokeUrl = (url) => URL.revokeObjectURL(url),
   wait = waitForRetry,
+  voiceAssignments = assignCharacterVoices(scene.characters),
 } = {}) {
   const entries = new Map()
 
@@ -56,7 +59,7 @@ export function createReaderAudio(scene, actor, {
       const response = await request('/api/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: line.text, voice_index: scene.characters.indexOf(line.character) }),
+        body: JSON.stringify({ text: line.text, ...voiceAssignments[line.character] }),
         signal: entry.controller.signal,
       }).catch(rethrowNetworkFailure)
       if (!response.ok) {

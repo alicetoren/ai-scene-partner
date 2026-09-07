@@ -80,3 +80,9 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .active-line p { margin-top: 0.5rem; white-space: pre-wrap; }
 .dialogue .current-line { outline: 3px solid #263238; outline-offset: 2px; }
 button:focus-visible { outline: 3px solid #263238; outline-offset: 3px; }
+
+.reader-voices { display: grid; gap: 0.75rem; margin: 0; padding: 1rem; border: 1px solid #e8e2dc; border-radius: 0.5rem; }
+.reader-voices p { margin: 0; }
+.voice-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.voice-row label { flex: 1 1 10rem; }
+.voice-row select { flex: 1 1 10rem; width: auto; }

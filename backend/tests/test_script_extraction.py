@@ -129,10 +129,10 @@ def test_unsupported_extensions_are_rejected(parser, filename):
 
 
 def test_pdf_page_extraction_failure_is_controlled(parser, monkeypatch):
-    from pypdf import PageObject
+    from pdfplumber.page import Page
     def unreadable(*args, **kwargs):
         raise ValueError('Internal PDF details')
-    monkeypatch.setattr(PageObject, 'extract_text', unreadable)
+    monkeypatch.setattr(Page, 'extract_text', unreadable)
     response = TestClient(app).post('/api/scenes/parse', files={'script_file': ('scene.pdf', make_pdf([SCRIPT]))})
     assert response.status_code == 422
     assert 'could not be read' in response.json()['detail']
@@ -242,3 +242,40 @@ def test_parser_receives_reconstructed_lines_for_positioned_pdf(parser):
 def test_txt_is_not_subject_to_pdf_reconstruction():
     text = "A:\n \nCan\n \nwe\n \ntalk?\r\nM: Y ou can't.\n\n  [quietly]\n"
     assert extract_script_text('scene.txt', text.encode()) == text
+
+
+@pytest.mark.parametrize('speakers', [('ARCHIE', 'JUGHEAD'), ('A', 'M')])
+def test_screenplay_drawing_order_does_not_change_visual_turn_order(parser, speakers):
+    """Real positioned PDF: later editing appends headers outside reading order."""
+    first, second = speakers
+    rows = [
+        '55.', 'INT. ROOM - NIGHT', 'Someone sets down a cup.',
+        second, 'Would have gone a long way with me.',
+        first, 'I was actually thinking...', '(putting it out there)',
+        '...I would maybe write her a song...to',
+        'explain, exactly, how much she means to me...',
+        'Someone looks out the window.', f"{first} (CONT\u2019D)",
+        'Did you hear?', second, 'Not yet.', '(then)', 'Tell me more.',
+        first, 'Tomorrow.', 'Someone leaves.',
+    ]
+    reader = PdfReader(BytesIO(make_pdf(['placeholder'])))
+    writer = PdfWriter()
+    writer.add_page(reader.pages[0])
+    operations = []
+    # Paint bottom-to-top, independently positioned, as can happen after edits.
+    for index in reversed(range(len(rows))):
+        line = rows[index]
+        x = 250 if line in (first, second, f"{first} (CONT\u2019D)") else 100
+        escaped = line.replace('(', '\\(').replace(')', '\\)')
+        operations.append(f'BT /F1 12 Tf 1 0 0 1 {x} {740-index*24} Tm ({escaped}) Tj ET')
+    stream = DecodedStreamObject()
+    stream.set_data('\n'.join(operations).encode('cp1252'))
+    writer.pages[0][NameObject('/Contents')] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    pdf = output.getvalue()
+    assert PdfReader(BytesIO(pdf)).pages[0].extract_text().startswith('Someone leaves.')
+    response = TestClient(app).post('/api/scenes/parse', files={'script_file': ('scene.pdf', pdf)})
+    assert response.status_code == 200
+    text = parser.parse.call_args.args[0]
+    assert [line.strip() for line in text.splitlines() if line.strip()] == rows

@@ -35,17 +35,17 @@ Open the URL Vite prints (usually `http://localhost:5173`). Vite proxies `/api` 
 
 ## Current scope
 
-Milestone 4 accepts UTF-8 `.txt` scripts and text-based `.pdf` scripts, parses dialogue into a validated scene, and lets an actor choose their character and practise with an AI-generated reader voice. No microphone, recording, or persistence is used.
+Milestone 4.5 accepts UTF-8 `.txt` scripts and text-based `.pdf` scripts, parses dialogue into a validated scene, and lets an actor choose their character and practise with an AI-generated reader voice. No microphone, recording, or persistence is used.
 
 ## Script upload and extraction
 
 Choose a TXT or PDF file up to **10 MiB**. The UI displays the selected filename, validates the extension/size, and preserves the analyzing state. TXT must use UTF-8; image-only/scanned PDFs are not supported. No OCR is performed.
 
-`POST /api/scenes/parse` still accepts the multipart field `script_file`. The route reads at most the upload limit plus one byte and closes the upload stream. The small `script_extraction` service validates the extension and size, then decodes UTF-8 or uses `pypdf` to extract PDF text from in-memory bytes. It uses pypdf layout extraction to reconstruct visual lines from positioned text objects, preserving vertical whitespace and indentation, then joins pages in document order with blank-line separators. The resulting string goes through the same OpenAI parser and Pydantic Scene validation as before. The parser, character selection, and playback do not know the source format. The synchronous route runs blocking extraction/parsing in FastAPI's thread pool. Uploaded PDFs are not permanently stored.
+`POST /api/scenes/parse` still accepts the multipart field `script_file`. The route reads at most the upload limit plus one byte and closes the upload stream. The small `script_extraction` service validates the extension and size, then decodes UTF-8 or uses `pdfplumber` to extract PDF text from in-memory bytes. It uses coordinate-based pdfplumber layout extraction to reconstruct visual lines from positioned text objects, preserving vertical whitespace and indentation, then joins pages in document order with blank-line separators. The resulting string goes through the same OpenAI parser and Pydantic Scene validation as before. The parser, character selection, and playback do not know the source format. The synchronous route runs blocking extraction/parsing in FastAPI's thread pool. Uploaded PDFs are not permanently stored.
 
 Unsupported extensions return 415; oversized files return 413. Empty files, PDFs with no pages, encrypted/unreadable PDFs, and PDFs without usable extracted text return helpful 422 errors before any AI call. Textless PDFs explain that image-only/scanned documents are not supported. Encrypted PDFs must be exported as unencrypted files first. PDFs containing an existing text layer can be read, but extraction quality and reading order depend on the original PDF. No header/footer removal, dictionary-based spelling repairs, or speculative word/paragraph joining is attempted.
 
-The only added dependency is `pypdf==6.17.0`, a pure-Python PDF library. After pulling this milestone, run `pip install -r requirements.txt` in the backend virtual environment and restart the backend if necessary.
+PDF ingestion uses `pdfplumber==0.11.10` for visual text reconstruction and retains `pypdf==6.17.0` for document validation and synthetic test PDFs. After pulling this milestone, run `pip install -r requirements.txt` in the backend virtual environment and restart the backend if necessary.
 
 ## Scene playback
 
@@ -57,15 +57,33 @@ If autoplay is blocked, press **Play Reader Line**. A transient generation failu
 
 The backend reads `OPENAI_API_KEY`, `OPENAI_MODEL` (parsing, default `gpt-5-mini`), `OPENAI_TTS_MODEL` (default `gpt-4o-mini-tts`), `OPENAI_TTS_VOICE` (default `marin`), and `OPENAI_TTS_VOICES` (ordered palette, default `marin,cedar,coral,ash`). Existing `.env` files need no additional values unless overriding defaults. Never put the API key in a frontend/Vite variable.
 
-React compares the current line's character with the selected actor. Only reader text and a deterministic character index are posted as `{"text":"Hello.","voice_index":1}` to `/api/speech`. The endpoint validates a nonempty string of up to 4096 characters, delegates to a small speech service, and returns WAV bytes with `audio/wav` and `Cache-Control: no-store`. Provider limits can also reject text; the UI reports a controlled failure. The synchronous route runs in FastAPI's thread pool. Individual speech calls have a 30-second timeout and SDK retries disabled. The frontend owns a single bounded recovery attempt, so retry layers cannot multiply requests.
+React compares the current line's character with the selected actor. Only reader text, a user-selected category, and its deterministic slot are posted as `{"text":"Hello.","voice_category":"feminine","voice_index":1}` to `/api/speech`. The endpoint validates a nonempty string of up to 4096 characters, delegates to a small speech service, and returns WAV bytes with `audio/wav` and `Cache-Control: no-store`. Provider limits can also reject text; the UI reports a controlled failure. The synchronous route runs in FastAPI's thread pool. Individual speech calls have a 30-second timeout and SDK retries disabled. The frontend owns a single bounded recovery attempt, so retry layers cannot multiply requests.
 
 The playback hook holds an explicit phase and line index. Phases are idle, actor, loading, playing, reader-ready, audio-blocked, speech-error, and complete. It uses synchronous guards against duplicate actions, an AbortController for pending requests, and a generation counter to ignore stale asynchronous results. Audio generation starts from user actions, avoiding duplicate requests from React StrictMode effect replay. Object URLs are revoked when no longer needed. The buffer stores both in-flight promises and prepared audio elements by line index, so foreground playback and prefetch share work. Failed prefetches do not retry in the background. When the line is needed, a transient failure gets one fresh on-demand request after a cancelable 500 ms backoff. Concurrent consumers share the recovery promise; a second failure reaches the controlled UI error. The same one-recovery limit applies to a cold on-demand request. Permanent errors (including invalid requests, authentication, configuration, and exhausted quota) do not automatically retry. The server communicates transient provider failures through `X-Speech-Retryable` and logs only error type, status/code, and request ID, never dialogue or credentials. No requests happen before Start; the first reader may still need to load. Prefetch may generate up to two lines that are never played if the user stops early.
 
 ## Reader voices and delivery
 
-The index in the validated scene's `characters` array maps to a server-side voice palette using modulo. The default voice is first, followed by the configured palette with duplicates removed. Character identity stays stable across repeated lines, restart, and changes to the selected actor within the same parsed scene. Voices repeat after the palette is exhausted; actor slots are left in the ordering to keep identities stable. No gender inference or additional AI call is involved. To use only the default voice, set `OPENAI_TTS_VOICES` to that voice or an empty value. Invalid voice names produce a controlled configuration error.
+After selecting your role, use **Reader voices** to choose **Feminine**, **Masculine**, or **Neutral / Any** for each AI-read character. Your own role is labeled **You · No AI speech**. Settings are locked during a run; **Restart Scene** enables editing again. Categories are normal React state, reset only when analyzing another script. Changing actor selection preserves them.
 
-`TTS_READER_INSTRUCTIONS` in backend configuration centralizes grounded, understated, conversational delivery with varied intonation and no unnecessary dramatic pauses. The default `gpt-4o-mini-tts` supports these instructions; alternate model overrides must support speech instructions and the configured voices. [Official speech documentation](https://developers.openai.com/api/docs/guides/text-to-speech) describes delivery instructions and recommends WAV/PCM for low latency.
+These are app-curated voice-presentation preferences, not gender identities or official OpenAI gender classifications. No character name or dialogue is used to infer gender. Neutral / Any means a mixed palette, not a guarantee of an androgynous sound. The [official speech documentation](https://developers.openai.com/api/docs/guides/text-to-speech) lists supported voice names without assigning gender categories.
+
+| Category | Default palette | Backend configuration |
+| --- | --- | --- |
+| Neutral / Any | marin, cedar, coral, ash | `OPENAI_TTS_VOICE` first, then `OPENAI_TTS_VOICES` |
+| Feminine | coral, nova, shimmer | `OPENAI_TTS_FEMININE_VOICES` |
+| Masculine | cedar, onyx, echo | `OPENAI_TTS_MASCULINE_VOICES` |
+
+React walks every character in scene order, including the actor, and assigns a consecutive slot within each selected category. The backend chooses that slot modulo the category palette length. This gives distinct voices within a category until the palette wraps. Any can overlap the other palettes. Changing the actor does not change slots; editing category choices can reassign slots before a new run. Backend palettes are deduplicated and validated; unknown voices or an empty category palette return a controlled configuration error. Existing clients that omit `voice_category` still use Any.
+
+The player key includes actor and voice assignments. A settings change remounts the player and runs the existing cleanup, aborting old requests and revoking audio URLs. Each cache therefore belongs to one fixed voice configuration. Prefetch, recovery, and replay all use that same assignment; no additional AI assignment call is made. The AI parser and Scene schema contain no voice settings.
+
+`TTS_READER_INSTRUCTIONS` and `TTS_SPEED` in backend configuration centralize delivery. The reader is clear, understated, and lightly brisk without rushing or theatrical emphasis. Speed is now `1.05` rather than the API default `1.0`; there is no user-facing pace control. The default `gpt-4o-mini-tts` supports delivery instructions. Alternate model overrides must support those instructions and the chosen palette.
+
+### Volume consistency
+
+After tail trimming, `normalize_volume` processes 16-bit PCM WAV audio using only Python's standard library. It measures RMS in active 20 ms windows (excluding windows below -50 dBFS), targets -20 dBFS active RMS, and applies one gain to the entire line. Gain is limited to 0.5–2.0 (roughly ±6 dB), with an additional -1 dBFS sample-peak ceiling. Silence is not amplified; stereo channels share a gain so their balance is preserved. The original waveform dynamics and timing remain intact, with no compressor or hard clipping.
+
+This is approximate level matching, not perceptually weighted LUFS normalization. Voice timbre and delivery can still produce perceived loudness differences; headroom and bounded gain take priority over exactly hitting the target. Unsupported audio or expected processing errors fall back to the already-trimmed input. WAV output headers use the actual frame count, preserving the prior unknown-length-header reliability fix. Prefetch and replay use these same processed bytes, without a client audio-processing layer or new dependency.
 
 ## Post-line silence
 
@@ -120,4 +138,14 @@ Milestone 4 manual checks:
 
 Some visually normal PDFs store each word or glyph in a separate text object. Default pypdf extraction can emit a newline after each object, so a sentence reaches the AI parser as many one-word lines. The supplied two-page audition PDF reproduced this: default extraction produced 227 nonempty lines, while layout mode reconstructed 24 visual lines containing 16 speaker turns. The malformed representation can encourage fragmented structured output; more output objects also plausibly increase generation time, but the original request latency was not instrumented.
 
-The ingestion service now uses `extraction_mode="layout"`, retaining vertical whitespace and including rotated text rather than silently dropping it. Truly blank pages are handled without attempting layout extraction. No text-level normalization is applied: real spaces, paragraph boundaries, labels, stage directions, and TXT input remain untouched. A generated regression fixture mimics separate positioned word/glyph objects and split contractions with both single-letter and full-name speakers. No copy of the user's script is included in the tests.
+The ingestion service now uses pdfplumber's coordinate-based layout reconstruction. A second, edited screenplay PDF demonstrated that pypdf layout could omit blocks and append character headers to dialogue; plain mode also misordered text. Both real PDFs were checked with the replacement. Only page-margin whitespace and right padding are removed; relative indentation and internal blank lines remain. No spelling repair or screenplay regex parsing is performed, and TXT is unchanged. Synthetic tests cover positioned glyphs and drawing commands stored in reverse visual order, with single-letter and full-name speakers.
+
+The AI instructions explicitly group wrapped dialogue and parentheticals under their preceding heading, canonicalize continuation suffixes, exclude action/page numbers, and require checking all turns in source order. The Scene schema validates structure, not semantic completeness: mocked tests verify the request/response boundary, while a bounded manual live parse checks actual model behavior.
+
+Milestone 4.5 manual checks:
+
+- Parse either PDF or TXT, choose your role, and set reader categories. Confirm no voice is inferred from a character name and no TTS is requested for your role.
+- Give two readers the same category and confirm distinct voices; change the actor role and check that remaining reader voices/settings stay stable.
+- Start playback and verify category controls are locked. Restart, change a category, and start again; no old prefetched audio should play. Replay should make no new request.
+- Listen across several voices at the same device volume. Check the slightly brisker pace, softer/louder lines, quiet endings, and sharp consonants for clarity and lack of distortion. Perceived category fit and loudness still need human listening review.
+- Repeat the existing prefetch/retry/restart and real-PDF checks. Automated tests make no live OpenAI calls.

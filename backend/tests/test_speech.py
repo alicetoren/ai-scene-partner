@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from openai import APIConnectionError, APIStatusError
 
 from app.main import app
-from app.config import TTS_READER_INSTRUCTIONS, get_character_voice
+from app.config import TTS_READER_INSTRUCTIONS, TTS_SPEED, get_character_voice
 from app.services.speech import OpenAISpeechService, SpeechGenerationError, get_speech_service
 
 
@@ -33,7 +33,7 @@ def test_speech_returns_audio_without_storage(service):
     assert response.content == b"mock wav bytes"
     assert response.headers["content-type"] == "audio/wav"
     assert response.headers["cache-control"] == "no-store"
-    service.generate.assert_called_once_with("Hello.", 0)
+    service.generate.assert_called_once_with("Hello.", 0, "any")
 
 
 @pytest.mark.parametrize("error, code, detail", [
@@ -66,6 +66,7 @@ def test_openai_speech_uses_configuration_and_wav(openai_client):
     client.audio.speech.create.assert_called_once_with(
         model="test-tts", voice="marin", input="Hello.", response_format="wav",
         instructions=TTS_READER_INSTRUCTIONS,
+        speed=TTS_SPEED,
     )
     openai_client.return_value.__exit__.assert_called_once()
 
@@ -104,7 +105,7 @@ def test_invalid_voice_index_never_calls_service(service, index):
 def test_endpoint_passes_character_index(service):
     response = TestClient(app).post("/api/speech", json={"text": "Hello.", "voice_index": 2})
     assert response.status_code == 200
-    service.generate.assert_called_once_with("Hello.", 2)
+    service.generate.assert_called_once_with("Hello.", 2, "any")
 
 
 def test_service_uses_assigned_voice(openai_client):
@@ -164,3 +165,41 @@ def test_realistic_provider_wav_survives_full_speech_endpoint(openai_client):
     with wave.open(BytesIO(response.content), "rb") as audio:
         assert audio.getnframes() == 6000
     client.audio.speech.create.assert_called_once()
+
+
+@pytest.mark.parametrize("category, expected", [
+    ("feminine", ["coral", "nova", "shimmer", "coral"]),
+    ("masculine", ["cedar", "onyx", "echo", "cedar"]),
+])
+def test_category_palettes_assign_distinct_voices_then_wrap(monkeypatch, category, expected):
+    monkeypatch.delenv(f"OPENAI_TTS_{category.upper()}_VOICES", raising=False)
+    assert [get_character_voice(i, category) for i in range(4)] == expected
+
+
+def test_category_palette_is_configurable_and_deduplicated(monkeypatch):
+    monkeypatch.setenv("OPENAI_TTS_FEMININE_VOICES", "nova, coral,nova")
+    assert [get_character_voice(i, "feminine") for i in range(3)] == ["nova", "coral", "nova"]
+
+
+@pytest.mark.parametrize("palette", ["", "unknown"])
+def test_invalid_category_palette_is_controlled(monkeypatch, palette):
+    monkeypatch.setenv("OPENAI_TTS_MASCULINE_VOICES", palette)
+    with pytest.raises(RuntimeError):
+        get_character_voice(0, "masculine")
+
+
+@pytest.mark.parametrize("category", ["male", "unknown", "", None, 1])
+def test_invalid_category_never_calls_speech_service(service, category):
+    response = TestClient(app).post("/api/speech", json={"text": "Hello.", "voice_category": category})
+    assert response.status_code == 422
+    service.generate.assert_not_called()
+
+
+def test_category_reaches_the_configured_provider_voice(openai_client, monkeypatch):
+    monkeypatch.setenv("OPENAI_TTS_FEMININE_VOICES", "coral,nova,shimmer")
+    client = openai_client.return_value.__enter__.return_value
+    client.audio.speech.create.return_value = SimpleNamespace(content=b"audio")
+    response = TestClient(app).post("/api/speech", json={"text": "Hello.", "voice_category": "feminine", "voice_index": 1})
+    assert response.status_code == 200
+    assert client.audio.speech.create.call_args.kwargs["voice"] == "nova"
+    assert client.audio.speech.create.call_args.kwargs["speed"] == 1.05

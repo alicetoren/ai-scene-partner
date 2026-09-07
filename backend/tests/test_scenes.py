@@ -111,3 +111,54 @@ def test_openai_parser_validates_structured_response(monkeypatch: pytest.MonkeyP
     scene = OpenAIScriptParser(client=FakeOpenAIClient()).parse("JANE: Hello.")  # type: ignore[arg-type]
 
     assert scene.lines[0].text == "Hello."
+
+
+def test_screenplay_contract_at_mocked_openai_boundary():
+    """Tests transport/validation, not the model's ability to obey instructions.
+
+    Actual semantic grouping is additionally checked with a bounded manual live parse.
+    """
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from app.services.script_parser import PARSER_INSTRUCTIONS
+
+    source = '''INT. ROOM - NIGHT
+Someone sets down a cup.
+    JUGHEAD
+Would’ve gone a long way with me.
+    ARCHIE
+I was actually thinking...
+    (putting it out there)
+...I would maybe write her a song...to
+explain, exactly, how much she means to me...
+Someone looks out the window.
+55.
+    ARCHIE (CONT’D)
+Did you hear?
+    JUGHEAD
+Not yet.
+    (then)
+Tell me more.
+    ARCHIE
+Tomorrow.
+Someone leaves.'''
+    expected = Scene(title='Uploaded Scene', characters=['JUGHEAD', 'ARCHIE'], lines=[
+        DialogueLine(id=1, character='JUGHEAD', text='Would’ve gone a long way with me.'),
+        DialogueLine(id=2, character='ARCHIE', text='I was actually thinking... ...I would maybe write her a song...to explain, exactly, how much she means to me...'),
+        DialogueLine(id=3, character='ARCHIE', text='Did you hear?'),
+        DialogueLine(id=4, character='JUGHEAD', text='Not yet. Tell me more.'),
+        DialogueLine(id=5, character='ARCHIE', text='Tomorrow.'),
+    ])
+    create = Mock(return_value=SimpleNamespace(output_text=expected.model_dump_json()))
+    fake_client = SimpleNamespace(responses=SimpleNamespace(create=create))
+    result = OpenAIScriptParser(client=fake_client).parse(source)
+    assert result == expected
+    assert create.call_count == 1
+    request = create.call_args.kwargs
+    assert request['input'] == source  # No destructive normalization or truncation.
+    assert request['instructions'] == PARSER_INSTRUCTIONS
+    assert 'standalone character heading starts a NEW dialogue turn' in request['instructions']
+    assert '(CONT’D)' in request['instructions']
+    assert 'Exclude action/stage-direction paragraphs' in request['instructions']
+    assert 'Ignore standalone page numbers' in request['instructions']
+    assert request['text']['format']['schema'] == Scene.model_json_schema()

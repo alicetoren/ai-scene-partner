@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import ScenePlayback from './components/ScenePlayback'
 import { validateScriptFile } from './upload'
+import { assignCharacterVoices, voicePlaybackKey } from './playback/voiceSettings'
 
 function App() {
   const [file, setFile] = useState(null)
@@ -8,6 +9,8 @@ function App() {
   const [selectedCharacter, setSelectedCharacter] = useState('')
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
+  const [voiceCategories, setVoiceCategories] = useState({})
+  const voiceAssignments = assignCharacterVoices(scene?.characters ?? [], voiceCategories)
 
   function handleFileChange(event) {
     const nextFile = event.target.files?.[0] ?? null
@@ -27,6 +30,7 @@ function App() {
     setError('')
     setScene(null)
     setSelectedCharacter('')
+    setVoiceCategories({})
 
     const formData = new FormData()
     formData.append('script_file', file)
@@ -84,7 +88,13 @@ function App() {
               {scene.characters.map((character) => <span key={character}>{character}</span>)}
             </div>
 
-            <ScenePlayback key={selectedCharacter} scene={scene} actor={selectedCharacter} />
+            <ScenePlayback
+              key={voicePlaybackKey(selectedCharacter, voiceAssignments)}
+              scene={scene}
+              actor={selectedCharacter}
+              voiceAssignments={voiceAssignments}
+              onCategoryChange={(character, category) => setVoiceCategories((previous) => ({ ...previous, [character]: category }))}
+            />
           </section>
         )}
       </section>
